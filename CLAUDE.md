@@ -676,4 +676,122 @@ Lambda trigger on Cognito that enforces:
 
 ---
 
-*Version 1.6 — Shanaka Jayasundera, Versent — March 2026*
+## CI/CD Pipeline — Issue-Driven Development Workflow
+
+The pipeline follows a **deploy → test → detect → fix → re-deploy** cycle. Every failure becomes a tracked GitHub issue, every fix is a PR linked to that issue.
+
+### Pipeline Stages (GitHub Actions)
+
+1. **Build & Lint**
+   - Backend: `mvn clean package` (Java 21 + Spring Boot 3)
+   - Frontend: `npm install && npm run build && npm run lint`
+   - Infrastructure: `npm install && npx tsc && npx cdk synth`
+
+2. **Unit & Integration Tests**
+   - Backend: `mvn test` (JUnit 5 + Mockito)
+   - Frontend: `npx vitest run` (Vitest + React Testing Library)
+   - Infrastructure: `npx jest` (CDK assertions)
+
+3. **Deploy to Dev/Staging**
+   - `cdk deploy --all --context environment=dev`
+   - Post-deploy health checks: API Gateway returns 200 on `/health`, CloudFront distributions are active
+
+4. **API Integration Tests**
+   - Run API test suite against deployed endpoints (auth flows, CRUD operations, pagination, CORS, error handling)
+   - Validate all endpoints return correct status codes, response shapes, and error formats
+   - Test role-based access: admin, customer, super_admin, impersonation read-only enforcement
+   - Test edge cases: expired tokens, invalid cursors, missing required fields, file size limits
+
+5. **E2E UI Tests (Playwright)**
+   - Run Playwright test suite against deployed environment covering all user journeys:
+     - **Super Admin journey:** Login → MFA → create space → invite admin → invite customer → upload report → view report (embedded + full-tab) → view analytics → view audit log → impersonate customer → exit impersonation
+     - **Admin journey:** Login → view assigned spaces → upload report → invite customer (with domain mismatch warning) → manage users → view feedback inbox → reply to feedback → view analytics
+     - **Customer journey:** Accept invitation → first login (password reset + MFA setup) → browse spaces → open report (full-tab default) → navigate report tabs → submit feedback with attachment → receive reply notification → session expiry overlay
+     - **Feedback flow:** Customer creates thread → admin receives notification → admin replies → customer sees reply → admin resolves thread
+     - **Security tests:** Customer cannot access other spaces, admin cannot access super_admin endpoints, impersonation blocks writes, non-versent.com.au blocked for admin invite
+   - Capture screenshots and traces on failure
+
+6. **Post-Test Analysis & Issue Creation**
+   - If any test fails, the pipeline automatically:
+     a. Creates a **GitHub issue** with: test name, failure reason, stack trace/screenshot, environment details, reproduction steps
+     b. Labels the issue: `bug`, `pipeline-detected`, and `api-test` or `e2e-test` or `unit-test`
+     c. Assigns to the relevant area (backend/frontend/infrastructure)
+   - Issue title format: `[Pipeline] {test-suite}: {test-name} failed — {error-summary}`
+
+7. **Fix Workflow (Claude Code)**
+   - For each pipeline-detected issue:
+     a. Create a fix branch: `fix/{issue-number}-{short-description}`
+     b. Diagnose root cause, implement fix
+     c. Run local tests to verify
+     d. Open a **PR targeting `main`** with: `Closes #{issue-number}` in the body, root cause analysis, what was changed, test plan
+     e. PR must pass all pipeline checks before merge
+
+8. **Merge & Re-Deploy**
+   - After PR approval and checks pass, merge to `main`
+   - Pipeline re-triggers: build → test → deploy → API tests → E2E tests
+   - Repeat until all tests pass (zero open pipeline-detected issues)
+
+9. **Production Deploy**
+   - Only from `main` after staging passes all tests
+   - `cdk deploy --all --context environment=prod`
+   - Post-deploy smoke tests (subset of E2E suite)
+   - Rollback procedure: `cdk deploy --all --context environment=prod --previous-version` or revert commit
+
+### Issue & PR Standards
+
+**Issue format (auto-created by pipeline):**
+```
+### Description
+{Test suite} test `{test name}` failed during pipeline run #{run-number}.
+
+### Error
+{Error message / assertion failure}
+
+### Stack Trace / Screenshot
+{Attached trace or screenshot from Playwright}
+
+### Environment
+- Branch: {branch}
+- Commit: {sha}
+- Environment: {dev/staging}
+- Pipeline run: {link}
+
+### Reproduction
+1. Deploy commit {sha} to {environment}
+2. Run: `{test command}`
+3. Observe failure in `{test name}`
+
+### Labels
+bug, pipeline-detected, {api-test|e2e-test|unit-test}
+```
+
+**PR format (fix for pipeline issue):**
+```
+## Summary
+Closes #{issue-number}
+
+## Root Cause
+{What caused the failure — missing dependency, incorrect assertion, timing issue, etc.}
+
+## Changes
+- {File 1}: {What changed and why}
+- {File 2}: {What changed and why}
+
+## Test Plan
+- [ ] Failing test now passes locally
+- [ ] No regressions in related tests
+- [ ] Build succeeds across all layers
+```
+
+### Pipeline Configuration
+
+The pipeline is defined in `.github/workflows/ci.yml` and uses:
+- **Triggers:** Push to `main`, push to `feat/*` and `fix/*` branches, PR to `main`
+- **Environments:** `dev` (on every push), `staging` (on PR to main), `prod` (manual approval after staging passes)
+- **Secrets:** AWS credentials, Cognito config, CloudFront key pair — stored in GitHub Actions secrets
+- **Artifacts:** Test reports, Playwright traces/screenshots, CDK diff output — uploaded as workflow artifacts
+- **Concurrency:** Cancel in-progress runs on the same branch (except `main`)
+
+---
+
+*Version 1.7 — Shanaka Jayasundera, Versent — March 2026*
