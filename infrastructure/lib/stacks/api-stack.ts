@@ -7,6 +7,7 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as events from 'aws-cdk-lib/aws-events';
+import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 import { EnvironmentConfig } from '../../bin/app';
@@ -181,6 +182,47 @@ export class ApiStack extends cdk.Stack {
       auditFunction.function,
       notificationFunction.function,
     ];
+
+    // ========== EventBridge Rules (targeting notification function) ==========
+    const eventRuleDefaults = {
+      retryAttempts: 3,
+      maxEventAge: cdk.Duration.hours(1),
+    };
+
+    new events.Rule(this, 'FeedbackNewRule', {
+      ruleName: `report-portal-feedback-new-${environmentName}`,
+      description: 'Triggers notification when new feedback is posted',
+      eventBus,
+      eventPattern: { source: ['report-portal'], detailType: ['feedback.new'] },
+    }).addTarget(new targets.LambdaFunction(notificationFunction.alias, eventRuleDefaults));
+
+    new events.Rule(this, 'FeedbackReplyRule', {
+      ruleName: `report-portal-feedback-reply-${environmentName}`,
+      description: 'Triggers notification when feedback reply is posted',
+      eventBus,
+      eventPattern: { source: ['report-portal'], detailType: ['feedback.reply'] },
+    }).addTarget(new targets.LambdaFunction(notificationFunction.alias, eventRuleDefaults));
+
+    new events.Rule(this, 'UserFirstLoginRule', {
+      ruleName: `report-portal-user-first-login-${environmentName}`,
+      description: 'Triggers notification when a user logs in for the first time',
+      eventBus,
+      eventPattern: { source: ['report-portal'], detailType: ['user.first_login'] },
+    }).addTarget(new targets.LambdaFunction(notificationFunction.alias, eventRuleDefaults));
+
+    new events.Rule(this, 'FeedbackResolvedRule', {
+      ruleName: `report-portal-feedback-resolved-${environmentName}`,
+      description: 'Triggers notification when feedback thread is resolved',
+      eventBus,
+      eventPattern: { source: ['report-portal'], detailType: ['feedback.resolved'] },
+    }).addTarget(new targets.LambdaFunction(notificationFunction.alias, eventRuleDefaults));
+
+    new events.Rule(this, 'InvitationAcceptedRule', {
+      ruleName: `report-portal-invitation-accepted-${environmentName}`,
+      description: 'Triggers notification when an invitation is accepted',
+      eventBus,
+      eventPattern: { source: ['report-portal'], detailType: ['invitation.accepted'] },
+    }).addTarget(new targets.LambdaFunction(notificationFunction.alias, eventRuleDefaults));
 
     // ========== IAM Permissions (Least Privilege) ==========
 

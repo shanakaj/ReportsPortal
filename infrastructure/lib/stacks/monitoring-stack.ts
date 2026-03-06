@@ -313,10 +313,10 @@ export class MonitoringStack extends cdk.Stack {
     apiLatencyAlarm.addAlarmAction(new cdk.aws_cloudwatch_actions.SnsAction(this.alarmTopic));
 
     // Lambda Error Alarms (one per function)
-    for (const fn of lambdaFunctions) {
-      const errorAlarm = new cloudwatch.Alarm(this, `LambdaError-${fn.functionName}`, {
-        alarmName: `report-portal-lambda-error-${fn.functionName}`,
-        alarmDescription: `Lambda function ${fn.functionName} error rate exceeded threshold`,
+    lambdaFunctions.forEach((fn, idx) => {
+      const errorAlarm = new cloudwatch.Alarm(this, `LambdaError${idx}`, {
+        alarmName: `report-portal-lambda-error-${idx}-${environmentName}`,
+        alarmDescription: `Lambda function error rate exceeded threshold`,
         metric: new cloudwatch.Metric({
           namespace: 'AWS/Lambda',
           metricName: 'Errors',
@@ -330,7 +330,7 @@ export class MonitoringStack extends cdk.Stack {
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       });
       errorAlarm.addAlarmAction(new cdk.aws_cloudwatch_actions.SnsAction(this.alarmTopic));
-    }
+    });
 
     // Lambda Throttle Alarm (aggregate)
     const throttleAlarm = new cloudwatch.Alarm(this, 'LambdaThrottleAlarm', {
@@ -360,10 +360,10 @@ export class MonitoringStack extends cdk.Stack {
     throttleAlarm.addAlarmAction(new cdk.aws_cloudwatch_actions.SnsAction(this.alarmTopic));
 
     // DynamoDB Throttle Alarm
-    for (const table of tables) {
-      const ddbThrottleAlarm = new cloudwatch.Alarm(this, `DdbThrottle-${table.tableName}`, {
-        alarmName: `report-portal-ddb-throttle-${table.tableName}`,
-        alarmDescription: `DynamoDB throttling on table ${table.tableName}`,
+    tables.forEach((table, idx) => {
+      const ddbThrottleAlarm = new cloudwatch.Alarm(this, `DdbThrottle${idx}`, {
+        alarmName: `report-portal-ddb-throttle-${idx}-${environmentName}`,
+        alarmDescription: `DynamoDB throttling detected`,
         metric: new cloudwatch.Metric({
           namespace: 'AWS/DynamoDB',
           metricName: 'ThrottledRequests',
@@ -377,7 +377,7 @@ export class MonitoringStack extends cdk.Stack {
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       });
       ddbThrottleAlarm.addAlarmAction(new cdk.aws_cloudwatch_actions.SnsAction(this.alarmTopic));
-    }
+    });
 
     // ========== Outputs ==========
 
