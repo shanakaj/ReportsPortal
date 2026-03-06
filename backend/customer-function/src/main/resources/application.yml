@@ -1,0 +1,38 @@
+spring:
+  application:
+    name: customer-function
+  main:
+    web-application-type: servlet
+
+cognito:
+  user-pool-id: ${COGNITO_USER_POOL_ID:ap-southeast-2_placeholder}
+  client-id: ${COGNITO_CLIENT_ID:placeholder}
+  region: ${AWS_REGION:ap-southeast-2}
+
+aws:
+  region: ${AWS_REGION:ap-southeast-2}
+
+dynamodb:
+  endpoint: ${DYNAMODB_ENDPOINT:}
+  tables:
+    users: ${USERS_TABLE:ReportPortal-Users}
+    spaces: ${SPACES_TABLE:ReportPortal-Spaces}
+    reports: ${REPORTS_TABLE:ReportPortal-Reports}
+    audit-log: ${AUDIT_LOG_TABLE:ReportPortal-AuditLog}
+    notifications: ${NOTIFICATIONS_TABLE:ReportPortal-Notifications}
+
+cloudfront:
+  domain: ${CLOUDFRONT_DOMAIN:reports.yourdomain.com}
+  key-pair-id: ${CLOUDFRONT_KEY_PAIR_ID:PLACEHOLDER}
+  private-key-path: ${CLOUDFRONT_PRIVATE_KEY_PATH:/opt/keys/cloudfront-private-key.pem}
+
+ses:
+  from-address: ${SES_FROM_ADDRESS:noreply@reports.yourdomain.com}
+
+eventbridge:
+  bus-name: ${EVENT_BUS_NAME:report-portal-events}
+  source: com.versent.reportportal
+
+logging:
+  level:
+    com.versent.reportportal: INFO

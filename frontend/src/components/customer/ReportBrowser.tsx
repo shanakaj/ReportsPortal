@@ -1,0 +1,94 @@
+import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { FileText, ExternalLink, MessageSquare } from 'lucide-react';
+import { listReports } from '@/services/reports';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { formatDistanceToNow } from 'date-fns';
+
+interface ReportBrowserProps {
+  spaceId: string;
+}
+
+export function ReportBrowser({ spaceId }: ReportBrowserProps) {
+  const navigate = useNavigate();
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['customer-reports', spaceId],
+    queryFn: () => listReports(spaceId, undefined, 20, false),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="space-y-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-20 w-full" />
+        ))}
+      </div>
+    );
+  }
+
+  const reports = data?.items ?? [];
+
+  if (reports.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <FileText className="h-12 w-12 text-muted-foreground mb-4" />
+        <h3 className="text-lg font-semibold">No reports available</h3>
+        <p className="text-sm text-muted-foreground mt-1">
+          Reports will appear here once they are uploaded by your admin.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {reports.map((report) => (
+        <Card key={report.reportId} className="hover:border-primary/30 transition-colors">
+          <CardContent className="flex items-center justify-between p-4">
+            <div className="flex items-center gap-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                <FileText className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-semibold">{report.fileName}</h4>
+                  {report.hasUnreadFeedback && (
+                    <MessageSquare className="h-4 w-4 text-primary" />
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {(report.fileSize / 1024 / 1024).toFixed(2)} MB &middot; Uploaded{' '}
+                  {formatDistanceToNow(new Date(report.uploadedAt), { addSuffix: true })}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  navigate(`/customer/spaces/${spaceId}/reports/${report.reportId}`)
+                }
+              >
+                View
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() =>
+                  window.open(`/report/${spaceId}/${report.reportId}`, '_blank')
+                }
+              >
+                <ExternalLink className="mr-1 h-3 w-3" />
+                Full Tab
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
