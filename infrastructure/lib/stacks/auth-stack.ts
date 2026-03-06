@@ -26,8 +26,8 @@ export class AuthStack extends cdk.Stack {
       functionName: `report-portal-pre-signup-${environmentName}`,
       description: 'Validates email domains and invitation tokens during Cognito sign-up',
       runtime: lambda.Runtime.JAVA_21,
-      handler: 'com.reportportal.auth.PreSignupHandler::handleRequest',
-      code: lambda.Code.fromAsset('../backend/auth-function/target/auth-function.jar'),
+      handler: 'com.versent.reportportal.triggers.PreSignupHandler::handleRequest',
+      code: lambda.Code.fromAsset('../backend/cognito-triggers/target/cognito-triggers.jar'),
       memorySize: 512,
       timeout: cdk.Duration.seconds(10),
       environment: {
@@ -106,8 +106,8 @@ export class AuthStack extends cdk.Stack {
       userInvitation: {
         emailSubject: 'Welcome to Versent Report Portal',
         emailBody:
-          'You have been invited to the Versent Report Portal. Your temporary password is {####}. ' +
-          'Please log in and set up your account.',
+          'Hello {username}, you have been invited to the Versent Report Portal. ' +
+          'Your temporary password is {####}. Please log in and set up your account.',
       },
       userVerification: {
         emailSubject: 'Verify your Report Portal email',
@@ -168,11 +168,6 @@ export class AuthStack extends cdk.Stack {
           phoneNumber: true,
         })
         .withCustomAttributes('role', 'customer_space', 'invited_by'),
-      writeAttributes: new cognito.ClientAttributes()
-        .withStandardAttributes({
-          fullname: true,
-          phoneNumber: true,
-        }),
     });
 
     // Admin App Client
@@ -213,12 +208,6 @@ export class AuthStack extends cdk.Stack {
           phoneNumber: true,
         })
         .withCustomAttributes('role', 'customer_space', 'invited_by'),
-      writeAttributes: new cognito.ClientAttributes()
-        .withStandardAttributes({
-          fullname: true,
-          phoneNumber: true,
-        })
-        .withCustomAttributes('role', 'customer_space'),
     });
 
     // Super Admin seeding via Custom Resource
@@ -278,7 +267,7 @@ exports.handler = async (event) => {
     await client.send(new AdminCreateUserCommand({
       UserPoolId: userPoolId,
       Username: email,
-      TemporaryPassword: 'Admin123!',
+      TemporaryPassword: 'Admin@12345!',
       UserAttributes: [
         { Name: 'email', Value: email },
         { Name: 'email_verified', Value: 'true' },

@@ -19,7 +19,7 @@ export class SecurityStack extends cdk.Stack {
     // WAF WebACL (must be in us-east-1 for CloudFront)
     const waf = new WafWebAcl(this, 'WebAcl', {
       name: `report-portal-waf-${environmentName}`,
-      description: `WAF WebACL for Report Portal (${environmentName})`,
+      description: `WAF WebACL for Report Portal - ${environmentName}`,
       rateLimit: envConfig.wafRateLimit,
       allowedGeoLocations: envConfig.allowedGeoLocations,
     });
