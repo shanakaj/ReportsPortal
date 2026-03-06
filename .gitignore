@@ -1,0 +1,62 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude / AI
+.claude/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+dist/
+build/
+.vite/
+
+# Java / Maven
+target/
+*.class
+*.jar
+*.war
+*.ear
+
+# CDK
+cdk.out/
+cdk.context.json
+
+# SAM
+.aws-sam/
+
+# Logs
+*.log
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Docker
+docker-compose.override.yml
+
+# Secrets
+*.pem
+*.key
+credentials.json
+
+# Terraform (should not exist, but just in case)
+.terraform/
+*.tfstate
+*.tfstate.backup
+
+# LocalStack
+.localstack/
+volume/
