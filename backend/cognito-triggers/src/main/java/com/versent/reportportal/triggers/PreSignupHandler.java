@@ -62,6 +62,16 @@ public class PreSignupHandler implements RequestHandler<Map<String, Object>, Map
         log.info("Pre-signup trigger: email={}, role={}, trigger={}", email, role, triggerSource);
 
         try {
+            // Allow admin-created users (AdminCreateUser API) to bypass invitation check
+            if ("PreSignUp_AdminCreateUser".equals(triggerSource)) {
+                log.info("Admin-created user, bypassing invitation validation for: {}", email);
+                Map<String, Object> response = (Map<String, Object>) event.getOrDefault("response", new HashMap<>());
+                response.put("autoConfirmUser", true);
+                response.put("autoVerifyEmail", true);
+                event.put("response", response);
+                return event;
+            }
+
             // Validate admin/super_admin email domain
             if ("admin".equalsIgnoreCase(role) || "super_admin".equalsIgnoreCase(role)) {
                 if (!email.endsWith(VERSENT_DOMAIN)) {

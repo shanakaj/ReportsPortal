@@ -151,7 +151,7 @@ export class WafWebAcl extends Construct {
               byteMatchStatement: {
                 fieldToMatch: {
                   singleHeader: {
-                    name: cloudFrontHeaderName,
+                    Name: cloudFrontHeaderName,
                   },
                 },
                 positionalConstraint: 'EXACTLY',
