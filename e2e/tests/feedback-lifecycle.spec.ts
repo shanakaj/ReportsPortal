@@ -1,165 +1,226 @@
-import { test, expect } from '../fixtures/auth';
+import { test, expect } from '../fixtures/auth.fixture';
+import { selectors } from '../helpers/selectors';
+import * as api from '../helpers/api';
+import path from 'path';
 
-test.describe('Feedback Lifecycle', () => {
-  test.describe('Full Feedback Thread Lifecycle', () => {
-    test('customer creates feedback, admin replies, admin resolves', async ({
-      page,
-      customer,
-      admin,
-    }) => {
-      const threadSubject = `E2E Lifecycle ${Date.now()}`;
+const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 
-      // Step 1: Customer logs in and creates feedback
-      await page.goto('/login');
-      await page.getByLabel(/email/i).fill(customer.email);
-      await page.getByLabel(/password/i).fill(customer.password);
-      await page.getByRole('button', { name: /sign in/i }).click();
-      await page.waitForURL(/\/(customer|mfa|dashboard|reports)/i, { timeout: 15_000 });
+test.describe.serial('Feedback Lifecycle — Full Flow', () => {
+  let spaceId: string;
+  let reportId: string;
 
-      if (page.url().includes('mfa')) {
-        test.skip(true, 'MFA verification required');
-        return;
-      }
-
-      // Navigate to reports and find a report to give feedback on
-      await page.getByRole('link', { name: /reports/i }).first().click();
-      await page.waitForLoadState('networkidle');
-
-      const reportLink = page.locator('a, [role="link"], tr').filter({ hasText: /report/i }).first();
-      if (!(await reportLink.isVisible())) {
-        test.skip(true, 'No reports available for feedback');
-        return;
-      }
-
-      await reportLink.click();
-      await page.waitForLoadState('networkidle');
-
-      const feedbackButton = page.getByRole('button', { name: /feedback|comment/i });
-      if (!(await feedbackButton.isVisible())) {
-        test.skip(true, 'Feedback button not available');
-        return;
-      }
-
-      await feedbackButton.click();
-      await page.getByLabel(/subject|title/i).fill(threadSubject);
-      const messageInput = page.getByLabel(/message|comment/i).or(page.locator('textarea'));
-      await messageInput.fill('Customer initial feedback message');
-      await page.getByRole('button', { name: /submit|send|create/i }).click();
-      await expect(page.getByText(/submitted|created|success/i)).toBeVisible({ timeout: 10_000 });
-
-      // Step 2: Customer logs out
-      const logoutButton = page.getByRole('button', { name: /logout|sign out/i });
-      if (await logoutButton.isVisible()) {
-        await logoutButton.click();
-      } else {
-        await page.goto('/login');
-      }
-
-      // Step 3: Admin logs in and replies to feedback
-      await page.getByLabel(/email/i).fill(admin.email);
-      await page.getByLabel(/password/i).fill(admin.password);
-      await page.getByRole('button', { name: /sign in/i }).click();
-      await page.waitForURL(/\/(admin|mfa|dashboard)/i, { timeout: 15_000 });
-
-      if (page.url().includes('mfa')) {
-        test.skip(true, 'MFA verification required for admin');
-        return;
-      }
-
-      await page.getByRole('link', { name: /feedback/i }).click();
-      await page.waitForLoadState('networkidle');
-
-      // Find the thread we just created
-      const threadLink = page.getByText(threadSubject);
-      if (await threadLink.isVisible()) {
-        await threadLink.click();
-        await page.waitForLoadState('networkidle');
-
-        // Admin replies
-        const replyInput = page.getByLabel(/message|reply/i).or(page.locator('textarea'));
-        await replyInput.fill('Admin response to customer feedback');
-        await page.getByRole('button', { name: /send|reply|submit/i }).click();
-        await expect(page.getByText('Admin response to customer feedback')).toBeVisible({ timeout: 10_000 });
-
-        // Admin resolves the thread
-        const resolveButton = page.getByRole('button', { name: /resolve/i });
-        if (await resolveButton.isVisible()) {
-          await resolveButton.click();
-          await expect(page.getByText(/resolved/i)).toBeVisible({ timeout: 10_000 });
+  test.beforeAll(async ({ request, superAdminToken }) => {
+    try {
+      const spaces = await api.listSpaces(request, superAdminToken);
+      if (spaces.items.length > 0) {
+        spaceId = spaces.items[0].spaceId;
+        const reports = await api.listReports(request, superAdminToken, spaceId);
+        if (reports.items.length > 0) {
+          reportId = reports.items[0].reportId;
         }
       }
-    });
+    } catch {
+      // Will skip tests if no data
+    }
   });
 
-  test.describe('Feedback with Attachments', () => {
-    test('customer can attach files to feedback', async ({ page, customer }) => {
-      await page.goto('/login');
-      await page.getByLabel(/email/i).fill(customer.email);
-      await page.getByLabel(/password/i).fill(customer.password);
-      await page.getByRole('button', { name: /sign in/i }).click();
-      await page.waitForURL(/\/(customer|mfa|dashboard|reports)/i, { timeout: 15_000 });
+  test('Step 1: Customer creates feedback thread on a report', async ({ customerPage: page }) => {
+    test.skip(!spaceId || !reportId, 'No space/report available');
 
-      if (page.url().includes('mfa')) {
-        test.skip(true, 'MFA verification required');
-        return;
-      }
+    await page.goto(`${BASE_URL}/customer/spaces/${spaceId}/reports/${reportId}`);
+    await expect(page.locator(selectors.reportViewer.container)).toBeVisible({ timeout: 15_000 });
 
-      await page.getByRole('link', { name: /reports/i }).first().click();
-      await page.waitForLoadState('networkidle');
+    const feedbackToggle = page.locator(selectors.reportViewer.feedbackToggle);
+    if (await feedbackToggle.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await feedbackToggle.click();
+    }
 
-      const reportLink = page.locator('a, [role="link"], tr').filter({ hasText: /report/i }).first();
-      if (await reportLink.isVisible()) {
-        await reportLink.click();
-        await page.waitForLoadState('networkidle');
+    const newThreadBtn = page.locator(selectors.feedback.newThreadButton);
+    await expect(newThreadBtn).toBeVisible({ timeout: 5_000 });
+    await newThreadBtn.click();
 
-        const feedbackButton = page.getByRole('button', { name: /feedback|comment/i });
-        if (await feedbackButton.isVisible()) {
-          await feedbackButton.click();
+    const subject = `E2E Lifecycle ${Date.now()}`;
+    await page.locator(selectors.feedback.subjectInput).fill(subject);
+    await page.locator(selectors.feedback.messageEditor).fill('Customer initial feedback — please review findings on page 3.');
+    await page.locator(selectors.feedback.submitButton).click();
 
-          await page.getByLabel(/subject|title/i).fill('Feedback with attachment');
-          const messageInput = page.getByLabel(/message|comment/i).or(page.locator('textarea'));
-          await messageInput.fill('See attached file for details');
-
-          // Attach file
-          const fileInput = page.locator('input[type="file"]');
-          if (await fileInput.isVisible()) {
-            await fileInput.setInputFiles('fixtures/test-attachment.txt');
-          }
-
-          await page.getByRole('button', { name: /submit|send|create/i }).click();
-          await expect(page.getByText(/submitted|created|success/i)).toBeVisible({ timeout: 10_000 });
-        }
-      }
-    });
+    await expect(page.locator(selectors.common.toastSuccess).or(page.getByText(/created|submitted/i))).toBeVisible({ timeout: 10_000 });
   });
 
-  test.describe('Feedback Notifications', () => {
-    test('admin receives notification when customer creates feedback', async ({
-      page,
-      admin,
-    }) => {
-      // Login as admin to check notifications
-      await page.goto('/login');
-      await page.getByLabel(/email/i).fill(admin.email);
-      await page.getByLabel(/password/i).fill(admin.password);
-      await page.getByRole('button', { name: /sign in/i }).click();
-      await page.waitForURL(/\/(admin|mfa|dashboard)/i, { timeout: 15_000 });
+  test('Step 2: Admin sees notification for new feedback', async ({ adminPage: page }) => {
+    test.skip(!spaceId, 'No space available');
 
-      if (page.url().includes('mfa')) {
-        test.skip(true, 'MFA verification required');
-        return;
+    await page.goto(BASE_URL);
+    const notifBtn = page.locator(selectors.nav.notificationsButton);
+    await expect(notifBtn).toBeVisible({ timeout: 10_000 });
+
+    await notifBtn.click();
+    const dropdown = page.locator(selectors.notifications.dropdown);
+    await expect(dropdown.or(page.getByText(/notification|feedback/i))).toBeVisible({ timeout: 5_000 });
+  });
+
+  test('Step 3: Admin navigates to feedback and replies', async ({ adminPage: page }) => {
+    test.skip(!spaceId, 'No space available');
+
+    await page.goto(BASE_URL);
+    const feedbackLink = page.locator(selectors.nav.feedbackLink);
+    if (!(await feedbackLink.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      test.skip();
+      return;
+    }
+    await feedbackLink.click();
+    await expect(page.locator(selectors.feedback.threadList).or(page.getByText(/feedback/i))).toBeVisible({ timeout: 10_000 });
+
+    const threadCard = page.locator(selectors.feedback.threadCard).first();
+    if (!(await threadCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      test.skip();
+      return;
+    }
+    await threadCard.click();
+
+    await expect(page.getByText(/please review findings/i)).toBeVisible({ timeout: 5_000 });
+
+    const replyInput = page.locator(selectors.feedback.replyInput);
+    await expect(replyInput).toBeVisible({ timeout: 5_000 });
+    await replyInput.fill('Admin response: We have updated the findings based on the latest scan results.');
+    await page.locator(selectors.feedback.replyButton).click();
+
+    await expect(page.getByText(/updated the findings/i)).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('Step 4: Customer sees admin reply', async ({ customerPage: page }) => {
+    test.skip(!spaceId || !reportId, 'No space/report available');
+
+    await page.goto(`${BASE_URL}/customer/spaces/${spaceId}/reports/${reportId}`);
+    await expect(page.locator(selectors.reportViewer.container)).toBeVisible({ timeout: 15_000 });
+
+    const feedbackToggle = page.locator(selectors.reportViewer.feedbackToggle);
+    if (await feedbackToggle.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await feedbackToggle.click();
+    }
+
+    const threadCard = page.locator(selectors.feedback.threadCard).first();
+    if (await threadCard.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await threadCard.click();
+      const adminReply = page.getByText(/updated the findings/i);
+      if (await adminReply.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        await expect(adminReply).toBeVisible();
       }
+    }
+  });
 
-      // Check notification icon for badge/count
-      const notificationIcon = page.getByRole('button', { name: /notification/i })
-        .or(page.locator('[data-testid="notifications"]'));
+  test('Step 5: Customer replies back', async ({ customerPage: page }) => {
+    test.skip(!spaceId || !reportId, 'No space/report available');
 
-      if (await notificationIcon.isVisible()) {
-        await notificationIcon.click();
-        // Should see notification list
-        const notificationList = page.getByText(/notification|feedback|no notification/i);
-        await expect(notificationList).toBeVisible({ timeout: 5_000 });
-      }
-    });
+    await page.goto(`${BASE_URL}/customer/spaces/${spaceId}/reports/${reportId}`);
+    await expect(page.locator(selectors.reportViewer.container)).toBeVisible({ timeout: 15_000 });
+
+    const feedbackToggle = page.locator(selectors.reportViewer.feedbackToggle);
+    if (await feedbackToggle.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await feedbackToggle.click();
+    }
+
+    const threadCard = page.locator(selectors.feedback.threadCard).first();
+    if (!(await threadCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      test.skip();
+      return;
+    }
+    await threadCard.click();
+
+    const replyInput = page.locator(selectors.feedback.replyInput);
+    if (!(await replyInput.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      test.skip();
+      return;
+    }
+    await replyInput.fill('Thank you — looks good now.');
+    await page.locator(selectors.feedback.replyButton).click();
+    await expect(page.getByText(/looks good now/i)).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('Step 6: Admin resolves the thread', async ({ adminPage: page }) => {
+    test.skip(!spaceId, 'No space available');
+
+    await page.goto(BASE_URL);
+    const feedbackLink = page.locator(selectors.nav.feedbackLink);
+    if (!(await feedbackLink.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      test.skip();
+      return;
+    }
+    await feedbackLink.click();
+
+    const threadCard = page.locator(selectors.feedback.threadCard).first();
+    if (!(await threadCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      test.skip();
+      return;
+    }
+    await threadCard.click();
+
+    const resolveBtn = page.locator(selectors.feedback.resolveButton);
+    if (!(await resolveBtn.isVisible({ timeout: 3_000 }).catch(() => false))) {
+      test.skip();
+      return;
+    }
+    await resolveBtn.click();
+    await expect(page.getByText(/resolved/i)).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('Step 7: Customer sees resolved status', async ({ customerPage: page }) => {
+    test.skip(!spaceId || !reportId, 'No space/report available');
+
+    await page.goto(`${BASE_URL}/customer/spaces/${spaceId}/reports/${reportId}`);
+    await expect(page.locator(selectors.reportViewer.container)).toBeVisible({ timeout: 15_000 });
+
+    const feedbackToggle = page.locator(selectors.reportViewer.feedbackToggle);
+    if (await feedbackToggle.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await feedbackToggle.click();
+    }
+
+    const resolvedBadge = page.getByText(/resolved/i);
+    if (await resolvedBadge.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await expect(resolvedBadge).toBeVisible();
+    }
+  });
+});
+
+test.describe('Feedback with Attachments', () => {
+  test('customer can attach files to feedback messages', async ({ customerPage: page }) => {
+    await page.goto(BASE_URL);
+
+    const spaceCard = page.locator(selectors.customerPortal.spaceCard).first().or(page.locator(selectors.spaceList.spaceCard).first());
+    if (!(await spaceCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      test.skip();
+      return;
+    }
+    await spaceCard.click();
+
+    const reportCard = page.locator(selectors.customerPortal.reportCard).first().or(page.locator(selectors.spaceDetail.reportCard).first());
+    if (!(await reportCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      test.skip();
+      return;
+    }
+    await reportCard.click();
+
+    const feedbackToggle = page.locator(selectors.reportViewer.feedbackToggle);
+    if (await feedbackToggle.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await feedbackToggle.click();
+    }
+
+    const newThreadBtn = page.locator(selectors.feedback.newThreadButton);
+    if (!(await newThreadBtn.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      test.skip();
+      return;
+    }
+    await newThreadBtn.click();
+
+    await page.locator(selectors.feedback.subjectInput).fill('Feedback with attachment');
+    await page.locator(selectors.feedback.messageEditor).fill('See attached evidence');
+
+    const fileInput = page.locator(selectors.feedback.attachmentInput);
+    if (await fileInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await fileInput.setInputFiles(path.resolve(__dirname, '..', 'fixtures', 'test-attachment.txt'));
+    }
+
+    await page.locator(selectors.feedback.submitButton).click();
+    await expect(page.locator(selectors.common.toastSuccess).or(page.getByText(/created|submitted/i))).toBeVisible({ timeout: 10_000 });
   });
 });

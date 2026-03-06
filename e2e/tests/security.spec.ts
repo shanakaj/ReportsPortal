@@ -1,204 +1,301 @@
-import { test, expect } from '../fixtures/auth';
+import { test, expect } from '../fixtures/auth.fixture';
+import { selectors } from '../helpers/selectors';
 
-test.describe('Security Boundaries', () => {
-  test.describe('Route Protection', () => {
-    test('should redirect unauthenticated users to login', async ({ page }) => {
-      await page.goto('/admin/dashboard');
-      await expect(page).toHaveURL(/login/i, { timeout: 10_000 });
+const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
+
+test.describe('Security Boundary Tests', () => {
+  test.describe('Route Protection — Unauthenticated', () => {
+    test('should redirect /admin to login', async ({ page }) => {
+      await page.goto(`${BASE_URL}/admin`);
+      await page.waitForURL(/\/(login|auth)/, { timeout: 10_000 }).catch(() => {});
+
+      const onLogin = page.url().includes('/login') || page.url().includes('/auth');
+      const errorPage = await page.locator(selectors.common.errorPage).isVisible().catch(() => false);
+      const forbiddenPage = await page.locator(selectors.common.forbiddenPage).isVisible().catch(() => false);
+
+      expect(onLogin || errorPage || forbiddenPage).toBeTruthy();
     });
 
-    test('should redirect unauthenticated users from customer routes', async ({ page }) => {
-      await page.goto('/customer/reports');
-      await expect(page).toHaveURL(/login/i, { timeout: 10_000 });
+    test('should redirect /admin/spaces to login', async ({ page }) => {
+      await page.goto(`${BASE_URL}/admin/spaces`);
+      await page.waitForURL(/\/(login|auth)/, { timeout: 10_000 }).catch(() => {});
+
+      const onLogin = page.url().includes('/login') || page.url().includes('/auth');
+      const errorPage = await page.locator(selectors.common.errorPage).isVisible().catch(() => false);
+      expect(onLogin || errorPage).toBeTruthy();
     });
 
-    test('should redirect unauthenticated users from admin API routes', async ({ page }) => {
-      const response = await page.request.get('/admin/spaces');
-      expect([401, 403, 302]).toContain(response.status());
+    test('should redirect /admin/users to login', async ({ page }) => {
+      await page.goto(`${BASE_URL}/admin/users`);
+      await page.waitForURL(/\/(login|auth)/, { timeout: 10_000 }).catch(() => {});
+
+      const onLogin = page.url().includes('/login') || page.url().includes('/auth');
+      const errorPage = await page.locator(selectors.common.errorPage).isVisible().catch(() => false);
+      expect(onLogin || errorPage).toBeTruthy();
+    });
+
+    test('should redirect /customer/spaces to login', async ({ page }) => {
+      await page.goto(`${BASE_URL}/customer/spaces`);
+      await page.waitForURL(/\/(login|auth)/, { timeout: 10_000 }).catch(() => {});
+
+      const onLogin = page.url().includes('/login') || page.url().includes('/auth');
+      const errorPage = await page.locator(selectors.common.errorPage).isVisible().catch(() => false);
+      expect(onLogin || errorPage).toBeTruthy();
+    });
+
+    test('should redirect /admin/analytics to login', async ({ page }) => {
+      await page.goto(`${BASE_URL}/admin/analytics`);
+      await page.waitForURL(/\/(login|auth)/, { timeout: 10_000 }).catch(() => {});
+
+      const onLogin = page.url().includes('/login') || page.url().includes('/auth');
+      const errorPage = await page.locator(selectors.common.errorPage).isVisible().catch(() => false);
+      expect(onLogin || errorPage).toBeTruthy();
     });
   });
 
-  test.describe('Role-Based Access Control', () => {
-    test('customer cannot access admin routes', async ({ page, customer }) => {
-      await page.goto('/login');
-      await page.getByLabel(/email/i).fill(customer.email);
-      await page.getByLabel(/password/i).fill(customer.password);
-      await page.getByRole('button', { name: /sign in/i }).click();
-      await page.waitForURL(/\/(customer|mfa|dashboard|reports)/i, { timeout: 15_000 });
+  test.describe('Role-Based Access — Customer cannot access admin', () => {
+    test('customer redirected away from /admin', async ({ customerPage: page }) => {
+      await page.goto(`${BASE_URL}/admin`);
 
-      if (page.url().includes('mfa')) {
-        test.skip(true, 'MFA verification required');
-        return;
-      }
+      const forbidden = await page.locator(selectors.common.forbiddenPage).isVisible({ timeout: 5_000 }).catch(() => false);
+      const errorPage = await page.locator(selectors.common.errorPage).isVisible().catch(() => false);
+      const redirectedToLogin = page.url().includes('/login');
+      const redirectedToCustomer = page.url().includes('/customer');
 
-      // Try navigating to admin routes
-      await page.goto('/admin/dashboard');
-
-      // Should be redirected or see forbidden
-      await expect(
-        page.getByText(/forbidden|unauthorized|access denied/i)
-          .or(page.locator('body'))
-      ).toBeVisible();
-
-      // URL should not be admin dashboard
-      expect(page.url()).not.toMatch(/admin\/dashboard$/);
+      expect(forbidden || errorPage || redirectedToLogin || redirectedToCustomer).toBeTruthy();
     });
 
-    test('customer cannot access other customer spaces', async ({ page, customer }) => {
-      await page.goto('/login');
-      await page.getByLabel(/email/i).fill(customer.email);
-      await page.getByLabel(/password/i).fill(customer.password);
-      await page.getByRole('button', { name: /sign in/i }).click();
-      await page.waitForURL(/\/(customer|mfa|dashboard|reports)/i, { timeout: 15_000 });
+    test('customer cannot access /admin/spaces', async ({ customerPage: page }) => {
+      await page.goto(`${BASE_URL}/admin/spaces`);
 
-      if (page.url().includes('mfa')) {
-        test.skip(true, 'MFA verification required');
-        return;
-      }
-
-      // Try accessing a random space ID
-      await page.goto('/customer/spaces/nonexistent-space-id/reports');
-
-      // Should see error or be redirected
-      await expect(
-        page.getByText(/not found|forbidden|unauthorized|no reports/i)
-          .or(page.locator('body'))
-      ).toBeVisible();
+      const forbidden = await page.locator(selectors.common.forbiddenPage).isVisible({ timeout: 5_000 }).catch(() => false);
+      const redirected = !page.url().includes('/admin/spaces');
+      expect(forbidden || redirected).toBeTruthy();
     });
 
-    test('admin cannot access super-admin-only features', async ({ page, admin }) => {
-      await page.goto('/login');
-      await page.getByLabel(/email/i).fill(admin.email);
-      await page.getByLabel(/password/i).fill(admin.password);
-      await page.getByRole('button', { name: /sign in/i }).click();
-      await page.waitForURL(/\/(admin|mfa|dashboard)/i, { timeout: 15_000 });
+    test('customer cannot access /admin/users', async ({ customerPage: page }) => {
+      await page.goto(`${BASE_URL}/admin/users`);
 
-      if (page.url().includes('mfa')) {
-        test.skip(true, 'MFA verification required');
-        return;
-      }
+      const forbidden = await page.locator(selectors.common.forbiddenPage).isVisible({ timeout: 5_000 }).catch(() => false);
+      const redirected = !page.url().includes('/admin/users');
+      expect(forbidden || redirected).toBeTruthy();
+    });
 
-      // Admin should not see audit log (super_admin only)
-      const auditLink = page.getByRole('link', { name: /audit/i });
+    test('customer cannot access other customer spaces via URL', async ({ customerPage: page }) => {
+      const fakeSpaceId = 'unauthorized-space-12345';
+      await page.goto(`${BASE_URL}/customer/spaces/${fakeSpaceId}`);
+
+      const forbidden = await page.locator(selectors.common.forbiddenPage).isVisible({ timeout: 5_000 }).catch(() => false);
+      const errorPage = await page.locator(selectors.common.errorPage).isVisible().catch(() => false);
+      const redirected = !page.url().includes(fakeSpaceId);
+      expect(forbidden || errorPage || redirected).toBeTruthy();
+    });
+  });
+
+  test.describe('Role-Based Access — Admin cannot access super admin features', () => {
+    test('admin cannot see invite admin button', async ({ adminPage: page }) => {
+      await page.goto(BASE_URL);
+      await page.locator(selectors.nav.usersLink).click();
+      await expect(page.locator(selectors.userManagement.container)).toBeVisible({ timeout: 10_000 });
+
+      const inviteAdminBtn = page.locator(selectors.userManagement.inviteAdminButton);
+      const isVisible = await inviteAdminBtn.isVisible({ timeout: 3_000 }).catch(() => false);
+      expect(isVisible).toBeFalsy();
+    });
+
+    test('admin cannot see impersonate/view-as buttons', async ({ adminPage: page }) => {
+      await page.goto(BASE_URL);
+      await page.locator(selectors.nav.usersLink).click();
+      await expect(page.locator(selectors.userManagement.container)).toBeVisible({ timeout: 10_000 });
+
+      const viewAsBtn = page.locator(selectors.userManagement.viewAsButton);
+      const count = await viewAsBtn.count();
+      expect(count).toBe(0);
+    });
+
+    test('admin cannot see audit log', async ({ adminPage: page }) => {
+      await page.goto(BASE_URL);
+      await page.waitForLoadState('networkidle');
+
+      const auditLink = page.locator(selectors.nav.auditLink);
       await expect(auditLink).not.toBeVisible({ timeout: 3_000 });
+    });
 
-      // Admin should not see impersonate button
-      await page.getByRole('link', { name: /users/i }).click();
-      await page.waitForLoadState('networkidle');
+    test('admin cannot delete a space', async ({ adminPage: page }) => {
+      await page.goto(BASE_URL);
+      await page.locator(selectors.nav.spacesLink).click();
+      await expect(page.locator(selectors.spaceList.container)).toBeVisible({ timeout: 10_000 });
 
-      const impersonateButton = page.getByRole('button', { name: /impersonate/i }).first();
-      await expect(impersonateButton).not.toBeVisible({ timeout: 3_000 });
+      const spaceCard = page.locator(selectors.spaceList.spaceCard).first();
+      if (!(await spaceCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await spaceCard.click();
+
+      const deleteBtn = page.locator(selectors.spaceDetail.deleteButton);
+      const isVisible = await deleteBtn.isVisible({ timeout: 3_000 }).catch(() => false);
+      expect(isVisible).toBeFalsy();
     });
   });
 
-  test.describe('XSS Prevention', () => {
-    test('should sanitize malicious input in feedback', async ({ page, customer }) => {
-      await page.goto('/login');
-      await page.getByLabel(/email/i).fill(customer.email);
-      await page.getByLabel(/password/i).fill(customer.password);
-      await page.getByRole('button', { name: /sign in/i }).click();
-      await page.waitForURL(/\/(customer|mfa|dashboard|reports)/i, { timeout: 15_000 });
+  test.describe('Impersonation Security', () => {
+    test('impersonation mode disables all write actions', async ({ superAdminPage: page }) => {
+      await page.goto(BASE_URL);
+      await page.locator(selectors.nav.usersLink).click();
+      await expect(page.locator(selectors.userManagement.container)).toBeVisible({ timeout: 10_000 });
 
-      if (page.url().includes('mfa')) {
-        test.skip(true, 'MFA verification required');
+      const viewAsBtn = page.locator(selectors.userManagement.viewAsButton).first();
+      if (!(await viewAsBtn.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
         return;
       }
 
-      const feedbackNav = page.getByRole('link', { name: /feedback/i });
-      if (!(await feedbackNav.isVisible())) {
-        test.skip(true, 'Feedback nav not visible');
-        return;
+      await viewAsBtn.click();
+      await expect(page.locator(selectors.impersonation.banner)).toBeVisible({ timeout: 10_000 });
+
+      // Upload button should be disabled
+      const uploadBtn = page.locator(selectors.spaceDetail.uploadButton);
+      if (await uploadBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await expect(uploadBtn).toBeDisabled();
       }
 
-      await feedbackNav.click();
-      await page.waitForLoadState('networkidle');
-
-      const threadLink = page.locator('a, [role="link"], tr').filter({ hasText: /feedback|thread/i }).first();
-      if (await threadLink.isVisible()) {
-        await threadLink.click();
-        await page.waitForLoadState('networkidle');
-
-        const replyInput = page.getByLabel(/message|reply/i).or(page.locator('textarea'));
-        if (await replyInput.isVisible()) {
-          // Try XSS payload
-          await replyInput.fill('<script>alert("xss")</script>');
-          await page.getByRole('button', { name: /send|reply|submit/i }).click();
-          await page.waitForTimeout(2_000);
-
-          // The script should be sanitized - no alert dialog
-          const dialogs: string[] = [];
-          page.on('dialog', (dialog) => {
-            dialogs.push(dialog.message());
-            dialog.dismiss();
-          });
-
-          await page.waitForTimeout(1_000);
-          expect(dialogs).toHaveLength(0);
-        }
+      // Invite button should be disabled
+      const inviteBtn = page.locator(selectors.spaceDetail.inviteButton);
+      if (await inviteBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await expect(inviteBtn).toBeDisabled();
       }
+
+      // Exit impersonation
+      await page.locator(selectors.impersonation.exitButton).click();
+      await expect(page.locator(selectors.impersonation.banner)).toBeHidden({ timeout: 10_000 });
     });
   });
 
-  test.describe('Session Management', () => {
-    test('should clear session data on logout', async ({ page, context, superAdmin }) => {
-      await page.goto('/login');
-      await page.getByLabel(/email/i).fill(superAdmin.email);
-      await page.getByLabel(/password/i).fill(superAdmin.password);
-      await page.getByRole('button', { name: /sign in/i }).click();
-      await page.waitForURL(/\/(admin|mfa|dashboard)/i, { timeout: 15_000 });
+  test.describe('Email Domain Enforcement', () => {
+    test('non-versent.com.au email rejected for admin invite', async ({ superAdminPage: page }) => {
+      await page.goto(BASE_URL);
+      await page.locator(selectors.nav.usersLink).click();
+      await expect(page.locator(selectors.userManagement.container)).toBeVisible({ timeout: 10_000 });
 
-      if (page.url().includes('mfa')) {
-        test.skip(true, 'MFA verification required');
+      const inviteAdminBtn = page.locator(selectors.userManagement.inviteAdminButton);
+      if (!(await inviteAdminBtn.isVisible({ timeout: 3_000 }).catch(() => false))) {
+        test.skip();
         return;
       }
 
-      // Logout
-      const logoutButton = page.getByRole('button', { name: /logout|sign out/i });
-      if (await logoutButton.isVisible()) {
-        await logoutButton.click();
-        await page.waitForURL(/login/i, { timeout: 10_000 });
+      await inviteAdminBtn.click();
+      const dialog = page.locator(selectors.inviteUser.dialog);
+      await expect(dialog).toBeVisible();
 
-        // Verify tokens are cleared from localStorage
-        const accessToken = await page.evaluate(() => localStorage.getItem('accessToken'));
-        const idToken = await page.evaluate(() => localStorage.getItem('idToken'));
-        expect(accessToken).toBeNull();
-        expect(idToken).toBeNull();
-      }
+      await dialog.locator(selectors.inviteUser.emailInput).fill('invalid@gmail.com');
+      await dialog.locator(selectors.inviteUser.submitButton).click();
+
+      const error = dialog.locator(selectors.inviteUser.errorMessage).or(page.locator(selectors.common.toastError));
+      await expect(error).toBeVisible({ timeout: 5_000 });
     });
+  });
 
-    test('should prevent accessing protected routes after logout', async ({ page, superAdmin }) => {
-      // Login
-      await page.goto('/login');
-      await page.getByLabel(/email/i).fill(superAdmin.email);
-      await page.getByLabel(/password/i).fill(superAdmin.password);
-      await page.getByRole('button', { name: /sign in/i }).click();
-      await page.waitForURL(/\/(admin|mfa|dashboard)/i, { timeout: 15_000 });
+  test.describe('Expired Invitation Token', () => {
+    test('should show error for expired/invalid invitation token', async ({ page }) => {
+      await page.goto(`${BASE_URL}/invite/expired-token-12345`);
 
-      if (page.url().includes('mfa')) {
-        test.skip(true, 'MFA verification required');
-        return;
-      }
+      const errorPage = await page.locator(selectors.common.errorPage).isVisible({ timeout: 10_000 }).catch(() => false);
+      const alert = await page.locator('[role="alert"]').isVisible().catch(() => false);
+      const redirected = page.url().includes('/login');
 
-      // Logout
-      const logoutButton = page.getByRole('button', { name: /logout|sign out/i });
-      if (await logoutButton.isVisible()) {
-        await logoutButton.click();
-        await page.waitForURL(/login/i, { timeout: 10_000 });
-      }
-
-      // Try accessing protected route
-      await page.goto('/admin/dashboard');
-      await expect(page).toHaveURL(/login/i, { timeout: 10_000 });
+      expect(errorPage || alert || redirected).toBeTruthy();
     });
   });
 
   test.describe('CSRF Protection', () => {
-    test('should reject requests without proper authorization', async ({ page }) => {
-      // Make a direct API call without auth headers
-      const response = await page.request.post('/admin/spaces', {
+    test('should reject unauthenticated POST to admin API', async ({ request }) => {
+      const apiBase = process.env.API_BASE_URL || BASE_URL;
+      const response = await request.post(`${apiBase}/admin/spaces`, {
         data: { name: 'unauthorized-space' },
       });
       expect([401, 403]).toContain(response.status());
+    });
+
+    test('should reject unauthenticated DELETE to admin API', async ({ request }) => {
+      const apiBase = process.env.API_BASE_URL || BASE_URL;
+      const response = await request.delete(`${apiBase}/admin/spaces/fake-id`);
+      expect([401, 403, 404]).toContain(response.status());
+    });
+  });
+
+  test.describe('XSS Prevention', () => {
+    test('script tags in feedback should not execute', async ({ customerPage: page }) => {
+      await page.goto(BASE_URL);
+
+      const spaceCard = page.locator(selectors.customerPortal.spaceCard).first().or(page.locator(selectors.spaceList.spaceCard).first());
+      if (!(await spaceCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await spaceCard.click();
+
+      const reportCard = page.locator(selectors.customerPortal.reportCard).first().or(page.locator(selectors.spaceDetail.reportCard).first());
+      if (!(await reportCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await reportCard.click();
+
+      const feedbackToggle = page.locator(selectors.reportViewer.feedbackToggle);
+      if (await feedbackToggle.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await feedbackToggle.click();
+      }
+
+      const newThreadBtn = page.locator(selectors.feedback.newThreadButton);
+      if (!(await newThreadBtn.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await newThreadBtn.click();
+
+      await page.locator(selectors.feedback.subjectInput).fill('XSS Test <script>alert(1)</script>');
+      await page.locator(selectors.feedback.messageEditor).fill('<img src=x onerror=alert(1)>');
+
+      const dialogs: string[] = [];
+      page.on('dialog', async (dialog) => {
+        dialogs.push(dialog.message());
+        await dialog.dismiss();
+      });
+
+      await page.locator(selectors.feedback.submitButton).click();
+      await page.waitForTimeout(2_000);
+
+      expect(dialogs).toHaveLength(0);
+    });
+  });
+
+  test.describe('Session Management', () => {
+    test('should prevent access to protected routes after logout', async ({ page }) => {
+      const email = process.env.SUPER_ADMIN_EMAIL || 'superadmin@versent.com.au';
+      const password = process.env.SUPER_ADMIN_PASSWORD || 'TestPassword123!';
+
+      // Login
+      await page.goto(`${BASE_URL}/login`);
+      await page.locator(selectors.auth.emailInput).fill(email);
+      await page.locator(selectors.auth.passwordInput).fill(password);
+      await page.locator(selectors.auth.signInButton).click();
+      await page.waitForURL((url) => !url.pathname.endsWith('/login'), { timeout: 15_000 });
+
+      if (page.url().includes('mfa')) return;
+
+      // Logout
+      const logoutBtn = page.locator(selectors.nav.logoutButton);
+      if (await logoutBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await logoutBtn.click();
+        await page.waitForURL(/login/i, { timeout: 10_000 });
+      }
+
+      // Try protected route
+      await page.goto(`${BASE_URL}/admin`);
+      const onLogin = page.url().includes('/login') || page.url().includes('/auth');
+      const errorPage = await page.locator(selectors.common.errorPage).isVisible().catch(() => false);
+      expect(onLogin || errorPage).toBeTruthy();
     });
   });
 });

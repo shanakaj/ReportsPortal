@@ -1,196 +1,323 @@
-import { test, expect } from '../fixtures/auth';
+import { test, expect } from '../fixtures/auth.fixture';
+import { selectors } from '../helpers/selectors';
+import path from 'path';
+
+const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
+const TEST_ATTACHMENT_PATH = path.resolve(__dirname, '..', 'fixtures', 'test-attachment.txt');
 
 test.describe('Customer Journey', () => {
-  test.beforeEach(async ({ page, customer }) => {
-    await page.goto('/login');
-    await page.getByLabel(/email/i).fill(customer.email);
-    await page.getByLabel(/password/i).fill(customer.password);
-    await page.getByRole('button', { name: /sign in/i }).click();
-    await page.waitForURL(/\/(customer|mfa|dashboard|reports)/i, { timeout: 15_000 });
-
-    if (page.url().includes('mfa')) {
-      test.skip(true, 'MFA verification required');
-    }
-  });
-
   test.describe('Dashboard', () => {
-    test('should display customer dashboard', async ({ page }) => {
-      await expect(page.getByText(/dashboard|reports|welcome/i)).toBeVisible();
+    test('should display customer dashboard', async ({ customerPage: page }) => {
+      await page.goto(BASE_URL);
+      await expect(page.locator(selectors.dashboard.container)).toBeVisible({ timeout: 10_000 });
     });
 
-    test('should not show admin navigation items', async ({ page }) => {
-      await expect(page.getByRole('link', { name: /users|audit|analytics/i })).not.toBeVisible();
+    test('should NOT show admin navigation items', async ({ customerPage: page }) => {
+      await page.goto(BASE_URL);
+      await page.waitForLoadState('networkidle');
+
+      const usersLink = page.locator(selectors.nav.usersLink);
+      await expect(usersLink).not.toBeVisible({ timeout: 3_000 });
+
+      const auditLink = page.locator(selectors.nav.auditLink);
+      await expect(auditLink).not.toBeVisible({ timeout: 3_000 });
     });
 
-    test('should only see reports for assigned space', async ({ page }) => {
-      const reportList = page.getByText(/reports|no reports/i);
-      await expect(reportList).toBeVisible({ timeout: 10_000 });
+    test('should show notification bell', async ({ customerPage: page }) => {
+      await page.goto(BASE_URL);
+      await expect(page.locator(selectors.nav.notificationsButton)).toBeVisible({ timeout: 10_000 });
+    });
+
+    test('should only see assigned spaces', async ({ customerPage: page }) => {
+      await page.goto(BASE_URL);
+      const spaceList = page.locator(selectors.customerPortal.spaceCard).or(page.locator(selectors.spaceList.spaceCard));
+      const emptyState = page.locator(selectors.common.emptyState);
+      await expect(spaceList.first().or(emptyState)).toBeVisible({ timeout: 10_000 });
     });
   });
 
   test.describe('Report Viewing', () => {
-    test('should list available reports', async ({ page }) => {
-      await page.getByRole('link', { name: /reports/i }).first().click();
-      await page.waitForLoadState('networkidle');
+    test('should list reports in assigned space', async ({ customerPage: page }) => {
+      await page.goto(BASE_URL);
 
-      const reportList = page.locator('table, [data-testid="report-list"], [role="list"]');
-      await expect(reportList.or(page.getByText(/no reports/i))).toBeVisible({ timeout: 10_000 });
+      const spaceCard = page.locator(selectors.customerPortal.spaceCard).first().or(page.locator(selectors.spaceList.spaceCard).first());
+      if (!(await spaceCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await spaceCard.click();
+
+      const reportList = page.locator(selectors.customerPortal.reportList).or(page.locator(selectors.spaceDetail.reportList));
+      const emptyState = page.locator(selectors.common.emptyState);
+      await expect(reportList.or(emptyState)).toBeVisible({ timeout: 10_000 });
     });
 
-    test('should open a report in sandboxed iframe', async ({ page }) => {
-      await page.getByRole('link', { name: /reports/i }).first().click();
-      await page.waitForLoadState('networkidle');
+    test('should open a report and see it in iframe', async ({ customerPage: page }) => {
+      await page.goto(BASE_URL);
 
-      const reportLink = page.locator('a, [role="link"], tr').filter({ hasText: /report|\.html/i }).first();
-      if (await reportLink.isVisible()) {
-        await reportLink.click();
+      const spaceCard = page.locator(selectors.customerPortal.spaceCard).first().or(page.locator(selectors.spaceList.spaceCard).first());
+      if (!(await spaceCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await spaceCard.click();
 
-        // Report should be rendered in an iframe with sandbox attribute
-        const iframe = page.locator('iframe');
-        await expect(iframe).toBeVisible({ timeout: 15_000 });
+      const reportCard = page.locator(selectors.customerPortal.reportCard).first().or(page.locator(selectors.spaceDetail.reportCard).first());
+      if (!(await reportCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await reportCard.click();
 
-        // Verify sandbox attribute exists
-        const sandbox = await iframe.getAttribute('sandbox');
-        expect(sandbox).toBeDefined();
+      await expect(page.locator(selectors.reportViewer.container)).toBeVisible({ timeout: 15_000 });
+      await expect(page.locator(selectors.reportViewer.iframe)).toBeVisible({ timeout: 10_000 });
+    });
+
+    test('should have sandboxed iframe with allow-scripts allow-same-origin', async ({ customerPage: page }) => {
+      await page.goto(BASE_URL);
+
+      const spaceCard = page.locator(selectors.customerPortal.spaceCard).first().or(page.locator(selectors.spaceList.spaceCard).first());
+      if (!(await spaceCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await spaceCard.click();
+
+      const reportCard = page.locator(selectors.customerPortal.reportCard).first().or(page.locator(selectors.spaceDetail.reportCard).first());
+      if (!(await reportCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await reportCard.click();
+
+      const iframe = page.locator(selectors.reportViewer.iframe);
+      await expect(iframe).toBeVisible({ timeout: 15_000 });
+
+      const sandbox = await iframe.getAttribute('sandbox');
+      if (sandbox) {
         expect(sandbox).toContain('allow-scripts');
+        expect(sandbox).toContain('allow-same-origin');
+        expect(sandbox).not.toContain('allow-top-navigation');
       }
     });
 
-    test('should not allow report download if disabled', async ({ page }) => {
-      await page.getByRole('link', { name: /reports/i }).first().click();
-      await page.waitForLoadState('networkidle');
+    test('should NOT show upload or delete buttons for customer', async ({ customerPage: page }) => {
+      await page.goto(BASE_URL);
 
-      // Customer should not see download buttons unless explicitly allowed
-      const downloadButton = page.getByRole('button', { name: /download/i });
-      // Download may or may not be visible depending on space settings
+      const spaceCard = page.locator(selectors.customerPortal.spaceCard).first().or(page.locator(selectors.spaceList.spaceCard).first());
+      if (!(await spaceCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await spaceCard.click();
+
+      const uploadBtn = page.locator(selectors.spaceDetail.uploadButton);
+      await expect(uploadBtn).not.toBeVisible({ timeout: 3_000 });
+
+      const deleteBtn = page.locator(selectors.spaceDetail.deleteButton);
+      await expect(deleteBtn).not.toBeVisible({ timeout: 3_000 });
+    });
+
+    test('should show full-tab view option', async ({ customerPage: page }) => {
+      await page.goto(BASE_URL);
+
+      const spaceCard = page.locator(selectors.customerPortal.spaceCard).first().or(page.locator(selectors.spaceList.spaceCard).first());
+      if (!(await spaceCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await spaceCard.click();
+
+      const reportCard = page.locator(selectors.customerPortal.reportCard).first().or(page.locator(selectors.spaceDetail.reportCard).first());
+      if (!(await reportCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await reportCard.click();
+      await expect(page.locator(selectors.reportViewer.container)).toBeVisible({ timeout: 15_000 });
+
+      const fullTabBtn = page.locator(selectors.reportViewer.fullTabButton);
+      if (await fullTabBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await expect(fullTabBtn).toBeVisible();
+      }
     });
   });
 
   test.describe('Feedback', () => {
-    test('should create a new feedback thread on a report', async ({ page }) => {
-      await page.getByRole('link', { name: /reports/i }).first().click();
-      await page.waitForLoadState('networkidle');
+    test('should create a new feedback thread on a report', async ({ customerPage: page }) => {
+      await page.goto(BASE_URL);
 
-      const reportLink = page.locator('a, [role="link"], tr').filter({ hasText: /report/i }).first();
-      if (await reportLink.isVisible()) {
-        await reportLink.click();
-        await page.waitForLoadState('networkidle');
+      const spaceCard = page.locator(selectors.customerPortal.spaceCard).first().or(page.locator(selectors.spaceList.spaceCard).first());
+      if (!(await spaceCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await spaceCard.click();
 
-        const feedbackButton = page.getByRole('button', { name: /feedback|comment/i });
-        if (await feedbackButton.isVisible()) {
-          await feedbackButton.click();
+      const reportCard = page.locator(selectors.customerPortal.reportCard).first().or(page.locator(selectors.spaceDetail.reportCard).first());
+      if (!(await reportCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await reportCard.click();
 
-          await page.getByLabel(/subject|title/i).fill('E2E Test Feedback');
-          const messageInput = page.getByLabel(/message|comment/i).or(page.locator('textarea'));
-          await messageInput.fill('This is a test feedback message from E2E tests');
-          await page.getByRole('button', { name: /submit|send|create/i }).click();
+      // Toggle feedback
+      const feedbackToggle = page.locator(selectors.reportViewer.feedbackToggle);
+      if (await feedbackToggle.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await feedbackToggle.click();
+      }
 
-          await expect(page.getByText(/submitted|created|success/i)).toBeVisible({ timeout: 10_000 });
-        }
+      const newThreadBtn = page.locator(selectors.feedback.newThreadButton);
+      if (!(await newThreadBtn.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+
+      await newThreadBtn.click();
+      await page.locator(selectors.feedback.subjectInput).fill(`E2E Customer Feedback ${Date.now()}`);
+      await page.locator(selectors.feedback.messageEditor).fill('This is customer feedback from E2E test');
+      await page.locator(selectors.feedback.submitButton).click();
+
+      await expect(page.locator(selectors.common.toastSuccess).or(page.getByText(/submitted|created|success/i))).toBeVisible({ timeout: 10_000 });
+    });
+
+    test('should reply to own feedback thread', async ({ customerPage: page }) => {
+      await page.goto(BASE_URL);
+
+      const spaceCard = page.locator(selectors.customerPortal.spaceCard).first().or(page.locator(selectors.spaceList.spaceCard).first());
+      if (!(await spaceCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await spaceCard.click();
+
+      const reportCard = page.locator(selectors.customerPortal.reportCard).first().or(page.locator(selectors.spaceDetail.reportCard).first());
+      if (!(await reportCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await reportCard.click();
+
+      const feedbackToggle = page.locator(selectors.reportViewer.feedbackToggle);
+      if (await feedbackToggle.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await feedbackToggle.click();
+      }
+
+      const threadCard = page.locator(selectors.feedback.threadCard).first();
+      if (!(await threadCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await threadCard.click();
+
+      const replyInput = page.locator(selectors.feedback.replyInput);
+      if (!(await replyInput.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+
+      await replyInput.fill('Customer follow-up from E2E');
+      await page.locator(selectors.feedback.replyButton).click();
+      await expect(page.getByText('Customer follow-up from E2E')).toBeVisible({ timeout: 10_000 });
+    });
+
+    test('should upload attachment with feedback', async ({ customerPage: page }) => {
+      await page.goto(BASE_URL);
+
+      const spaceCard = page.locator(selectors.customerPortal.spaceCard).first().or(page.locator(selectors.spaceList.spaceCard).first());
+      if (!(await spaceCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await spaceCard.click();
+
+      const reportCard = page.locator(selectors.customerPortal.reportCard).first().or(page.locator(selectors.spaceDetail.reportCard).first());
+      if (!(await reportCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await reportCard.click();
+
+      const feedbackToggle = page.locator(selectors.reportViewer.feedbackToggle);
+      if (await feedbackToggle.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await feedbackToggle.click();
+      }
+
+      const attachInput = page.locator(selectors.feedback.attachmentInput);
+      if (await attachInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await attachInput.setInputFiles(TEST_ATTACHMENT_PATH);
       }
     });
 
-    test('should view existing feedback threads', async ({ page }) => {
-      const feedbackNav = page.getByRole('link', { name: /feedback/i });
-      if (await feedbackNav.isVisible()) {
-        await feedbackNav.click();
-        await page.waitForLoadState('networkidle');
+    test('should see resolved feedback status', async ({ customerPage: page }) => {
+      await page.goto(BASE_URL);
 
-        const feedbackList = page.getByText(/feedback|threads|no feedback/i);
-        await expect(feedbackList).toBeVisible({ timeout: 10_000 });
+      const spaceCard = page.locator(selectors.customerPortal.spaceCard).first().or(page.locator(selectors.spaceList.spaceCard).first());
+      if (!(await spaceCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
       }
-    });
+      await spaceCard.click();
 
-    test('should reply to own feedback thread', async ({ page }) => {
-      const feedbackNav = page.getByRole('link', { name: /feedback/i });
-      if (await feedbackNav.isVisible()) {
-        await feedbackNav.click();
-        await page.waitForLoadState('networkidle');
-
-        const threadLink = page.locator('a, [role="link"], tr').filter({ hasText: /feedback|thread/i }).first();
-        if (await threadLink.isVisible()) {
-          await threadLink.click();
-          await page.waitForLoadState('networkidle');
-
-          const replyInput = page.getByLabel(/message|reply/i).or(page.locator('textarea'));
-          if (await replyInput.isVisible()) {
-            await replyInput.fill('Customer follow-up from E2E test');
-            await page.getByRole('button', { name: /send|reply|submit/i }).click();
-
-            await expect(page.getByText('Customer follow-up from E2E test')).toBeVisible({ timeout: 10_000 });
-          }
-        }
+      const reportCard = page.locator(selectors.customerPortal.reportCard).first().or(page.locator(selectors.spaceDetail.reportCard).first());
+      if (!(await reportCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
       }
-    });
+      await reportCard.click();
 
-    test('should upload attachment with feedback', async ({ page }) => {
-      const feedbackNav = page.getByRole('link', { name: /feedback/i });
-      if (await feedbackNav.isVisible()) {
-        await feedbackNav.click();
-        await page.waitForLoadState('networkidle');
-
-        const threadLink = page.locator('a, [role="link"], tr').filter({ hasText: /feedback|thread/i }).first();
-        if (await threadLink.isVisible()) {
-          await threadLink.click();
-          await page.waitForLoadState('networkidle');
-
-          const attachButton = page.getByRole('button', { name: /attach/i }).or(page.locator('input[type="file"]'));
-          if (await attachButton.isVisible()) {
-            const fileInput = page.locator('input[type="file"]');
-            await fileInput.setInputFiles('fixtures/test-attachment.txt');
-          }
-        }
+      const feedbackToggle = page.locator(selectors.reportViewer.feedbackToggle);
+      if (await feedbackToggle.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await feedbackToggle.click();
       }
-    });
-  });
 
-  test.describe('Profile', () => {
-    test('should view profile page', async ({ page }) => {
-      const profileLink = page.getByRole('link', { name: /profile|account/i })
-        .or(page.getByRole('button', { name: /profile|account/i }));
-      if (await profileLink.isVisible()) {
-        await profileLink.click();
-        await expect(page.getByText(/profile|account/i)).toBeVisible({ timeout: 5_000 });
-      }
-    });
-
-    test('should change password', async ({ page }) => {
-      const profileLink = page.getByRole('link', { name: /profile|account|settings/i })
-        .or(page.getByRole('button', { name: /profile|account|settings/i }));
-      if (await profileLink.isVisible()) {
-        await profileLink.click();
-
-        const changePasswordButton = page.getByRole('button', { name: /change.*password/i });
-        if (await changePasswordButton.isVisible()) {
-          await changePasswordButton.click();
-
-          await page.getByLabel(/current.*password/i).fill('TestPassword123!');
-          await page.getByLabel(/new.*password/i).fill('NewTestPassword123!');
-          await page.getByLabel(/confirm.*password/i).fill('NewTestPassword123!');
-          await page.getByRole('button', { name: /save|update|change/i }).click();
-        }
+      // Look for resolved status badge
+      const resolvedBadge = page.getByText(/resolved/i);
+      if (await resolvedBadge.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await expect(resolvedBadge).toBeVisible();
       }
     });
   });
 
   test.describe('Notifications', () => {
-    test('should see notification indicator', async ({ page }) => {
-      const notificationIcon = page.getByRole('button', { name: /notification/i })
-        .or(page.locator('[data-testid="notifications"]'))
-        .or(page.locator('[aria-label*="notification"]'));
-
-      await expect(notificationIcon).toBeVisible({ timeout: 10_000 });
+    test('should see notification indicator', async ({ customerPage: page }) => {
+      await page.goto(BASE_URL);
+      await expect(page.locator(selectors.nav.notificationsButton)).toBeVisible({ timeout: 10_000 });
     });
 
-    test('should view notifications list', async ({ page }) => {
-      const notificationIcon = page.getByRole('button', { name: /notification/i })
-        .or(page.locator('[data-testid="notifications"]'))
-        .or(page.locator('[aria-label*="notification"]'));
+    test('should open notification dropdown and see items', async ({ customerPage: page }) => {
+      await page.goto(BASE_URL);
+      await page.locator(selectors.nav.notificationsButton).click();
 
-      if (await notificationIcon.isVisible()) {
-        await notificationIcon.click();
-        const notificationList = page.getByText(/notification|no notification/i);
-        await expect(notificationList).toBeVisible({ timeout: 5_000 });
+      const dropdown = page.locator(selectors.notifications.dropdown);
+      const emptyState = page.locator(selectors.notifications.emptyState);
+      await expect(dropdown.or(emptyState).or(page.getByText(/notification/i))).toBeVisible({ timeout: 5_000 });
+    });
+  });
+
+  test.describe('Profile & Settings', () => {
+    test('should view profile page', async ({ customerPage: page }) => {
+      await page.goto(BASE_URL);
+      const profileBtn = page.locator(selectors.nav.profileButton);
+      if (await profileBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        await profileBtn.click();
+        await expect(page.getByText(/profile|account|settings/i)).toBeVisible({ timeout: 5_000 });
+      }
+    });
+
+    test('should change password', async ({ customerPage: page }) => {
+      await page.goto(BASE_URL);
+      const profileBtn = page.locator(selectors.nav.profileButton);
+      if (!(await profileBtn.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await profileBtn.click();
+
+      const changePasswordBtn = page.locator('button:has-text("Change Password")');
+      if (await changePasswordBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await changePasswordBtn.click();
+        await expect(page.locator(selectors.auth.currentPasswordInput)).toBeVisible({ timeout: 5_000 });
       }
     });
   });

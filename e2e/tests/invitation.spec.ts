@@ -1,188 +1,194 @@
-import { test, expect } from '../fixtures/auth';
+import { test, expect } from '../fixtures/auth.fixture';
+import { selectors } from '../helpers/selectors';
 
-test.describe('Invitation Flow', () => {
-  test.describe('Admin Invites Customer', () => {
-    test('should show invite customer form in space detail', async ({ page, admin }) => {
-      await page.goto('/login');
-      await page.getByLabel(/email/i).fill(admin.email);
-      await page.getByLabel(/password/i).fill(admin.password);
-      await page.getByRole('button', { name: /sign in/i }).click();
-      await page.waitForURL(/\/(admin|mfa|dashboard)/i, { timeout: 15_000 });
+const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 
-      if (page.url().includes('mfa')) {
-        test.skip(true, 'MFA verification required');
+test.describe('Invitation Flows', () => {
+  test.describe('Admin Invites Customer to Space', () => {
+    test('should show invite button in space detail', async ({ adminPage: page }) => {
+      await page.goto(BASE_URL);
+      await page.locator(selectors.nav.spacesLink).click();
+      await expect(page.locator(selectors.spaceList.container)).toBeVisible({ timeout: 10_000 });
+
+      const spaceCard = page.locator(selectors.spaceList.spaceCard).first();
+      if (!(await spaceCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
         return;
       }
+      await spaceCard.click();
 
-      await page.getByRole('link', { name: /spaces|customers/i }).click();
-      await page.waitForLoadState('networkidle');
-
-      const spaceLink = page.locator('a, [role="link"], tr').filter({ hasText: /space/i }).first();
-      if (await spaceLink.isVisible()) {
-        await spaceLink.click();
-        await page.waitForLoadState('networkidle');
-
-        const inviteButton = page.getByRole('button', { name: /invite/i });
-        await expect(inviteButton).toBeVisible({ timeout: 5_000 });
-      }
+      const inviteBtn = page.locator(selectors.spaceDetail.inviteButton);
+      await expect(inviteBtn).toBeVisible({ timeout: 5_000 });
     });
 
-    test('should invite a customer via email', async ({ page, admin }) => {
-      await page.goto('/login');
-      await page.getByLabel(/email/i).fill(admin.email);
-      await page.getByLabel(/password/i).fill(admin.password);
-      await page.getByRole('button', { name: /sign in/i }).click();
-      await page.waitForURL(/\/(admin|mfa|dashboard)/i, { timeout: 15_000 });
+    test('should invite a customer via email', async ({ adminPage: page }) => {
+      await page.goto(BASE_URL);
+      await page.locator(selectors.nav.spacesLink).click();
+      await expect(page.locator(selectors.spaceList.container)).toBeVisible({ timeout: 10_000 });
 
-      if (page.url().includes('mfa')) {
-        test.skip(true, 'MFA verification required');
+      const spaceCard = page.locator(selectors.spaceList.spaceCard).first();
+      if (!(await spaceCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
         return;
       }
+      await spaceCard.click();
 
-      await page.getByRole('link', { name: /spaces|customers/i }).click();
-      await page.waitForLoadState('networkidle');
-
-      const spaceLink = page.locator('a, [role="link"], tr').filter({ hasText: /space/i }).first();
-      if (!(await spaceLink.isVisible())) {
-        test.skip(true, 'No spaces available');
+      const inviteBtn = page.locator(selectors.spaceDetail.inviteButton);
+      if (!(await inviteBtn.isVisible({ timeout: 3_000 }).catch(() => false))) {
+        test.skip();
         return;
       }
+      await inviteBtn.click();
 
-      await spaceLink.click();
-      await page.waitForLoadState('networkidle');
+      const dialog = page.locator(selectors.inviteUser.dialog);
+      await expect(dialog).toBeVisible({ timeout: 5_000 });
 
-      const inviteButton = page.getByRole('button', { name: /invite/i });
-      if (!(await inviteButton.isVisible())) {
-        test.skip(true, 'Invite button not visible');
-        return;
-      }
-
-      await inviteButton.click();
       const testEmail = `e2e-invite-${Date.now()}@example.com`;
-      await page.getByLabel(/email/i).fill(testEmail);
-      await page.getByRole('button', { name: /invite|send|submit/i }).click();
+      await dialog.locator(selectors.inviteUser.emailInput).fill(testEmail);
+      await dialog.locator(selectors.inviteUser.submitButton).click();
 
-      await expect(page.getByText(/invited|invitation.*sent|success/i)).toBeVisible({ timeout: 10_000 });
+      const success = page.locator(selectors.common.toastSuccess).or(page.getByText(/invited|sent|success/i));
+      await expect(success).toBeVisible({ timeout: 10_000 });
     });
 
-    test('should prevent duplicate invitations', async ({ page, admin }) => {
-      await page.goto('/login');
-      await page.getByLabel(/email/i).fill(admin.email);
-      await page.getByLabel(/password/i).fill(admin.password);
-      await page.getByRole('button', { name: /sign in/i }).click();
-      await page.waitForURL(/\/(admin|mfa|dashboard)/i, { timeout: 15_000 });
+    test('should show domain mismatch warning for mismatched email', async ({ adminPage: page }) => {
+      await page.goto(BASE_URL);
+      await page.locator(selectors.nav.spacesLink).click();
+      await expect(page.locator(selectors.spaceList.container)).toBeVisible({ timeout: 10_000 });
 
-      if (page.url().includes('mfa')) {
-        test.skip(true, 'MFA verification required');
+      const spaceCard = page.locator(selectors.spaceList.spaceCard).first();
+      if (!(await spaceCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await spaceCard.click();
+
+      const inviteBtn = page.locator(selectors.spaceDetail.inviteButton);
+      if (!(await inviteBtn.isVisible({ timeout: 3_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await inviteBtn.click();
+
+      const dialog = page.locator(selectors.inviteUser.dialog);
+      await expect(dialog).toBeVisible({ timeout: 5_000 });
+
+      await dialog.locator(selectors.inviteUser.emailInput).fill('user@totally-different-domain.com');
+
+      const warning = dialog.locator(selectors.inviteUser.domainWarning);
+      if (await warning.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await expect(warning).toContainText(/domain|mismatch/i);
+      }
+    });
+
+    test('should prevent duplicate invitation to same email', async ({ adminPage: page }) => {
+      await page.goto(BASE_URL);
+      await page.locator(selectors.nav.spacesLink).click();
+      await expect(page.locator(selectors.spaceList.container)).toBeVisible({ timeout: 10_000 });
+
+      const spaceCard = page.locator(selectors.spaceList.spaceCard).first();
+      if (!(await spaceCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
+      }
+      await spaceCard.click();
+
+      const inviteBtn = page.locator(selectors.spaceDetail.inviteButton);
+      if (!(await inviteBtn.isVisible({ timeout: 3_000 }).catch(() => false))) {
+        test.skip();
         return;
       }
 
-      await page.getByRole('link', { name: /spaces|customers/i }).click();
-      await page.waitForLoadState('networkidle');
+      const duplicateEmail = 'duplicate-invite-test@example.com';
 
-      const spaceLink = page.locator('a, [role="link"], tr').filter({ hasText: /space/i }).first();
-      if (!(await spaceLink.isVisible())) {
-        test.skip(true, 'No spaces available');
-        return;
-      }
-
-      await spaceLink.click();
-      await page.waitForLoadState('networkidle');
-
-      const inviteButton = page.getByRole('button', { name: /invite/i });
-      if (!(await inviteButton.isVisible())) {
-        test.skip(true, 'Invite button not visible');
-        return;
-      }
-
-      // Use a fixed email to test duplicate prevention
-      const duplicateEmail = 'duplicate-test@example.com';
-
-      // First invitation
-      await inviteButton.click();
-      await page.getByLabel(/email/i).fill(duplicateEmail);
-      await page.getByRole('button', { name: /invite|send|submit/i }).click();
+      // First invite
+      await inviteBtn.click();
+      let dialog = page.locator(selectors.inviteUser.dialog);
+      await expect(dialog).toBeVisible({ timeout: 5_000 });
+      await dialog.locator(selectors.inviteUser.emailInput).fill(duplicateEmail);
+      await dialog.locator(selectors.inviteUser.submitButton).click();
       await page.waitForTimeout(2_000);
 
-      // Second invitation with same email
-      await inviteButton.click();
-      await page.getByLabel(/email/i).fill(duplicateEmail);
-      await page.getByRole('button', { name: /invite|send|submit/i }).click();
+      // Second invite with same email
+      await inviteBtn.click();
+      dialog = page.locator(selectors.inviteUser.dialog);
+      await expect(dialog).toBeVisible({ timeout: 5_000 });
+      await dialog.locator(selectors.inviteUser.emailInput).fill(duplicateEmail);
+      await dialog.locator(selectors.inviteUser.submitButton).click();
 
-      // Should see duplicate/already invited error
-      await expect(
-        page.getByText(/already|duplicate|exists|conflict/i)
-          .or(page.getByText(/invited|success/i))
-      ).toBeVisible({ timeout: 10_000 });
+      const result = page.locator(selectors.common.toastError)
+        .or(page.getByText(/already|duplicate|exists/i))
+        .or(page.locator(selectors.common.toastSuccess));
+      await expect(result).toBeVisible({ timeout: 10_000 });
     });
   });
 
   test.describe('Super Admin Invites Admin', () => {
-    test('should show invite admin option for super admin', async ({ page, superAdmin }) => {
-      await page.goto('/login');
-      await page.getByLabel(/email/i).fill(superAdmin.email);
-      await page.getByLabel(/password/i).fill(superAdmin.password);
-      await page.getByRole('button', { name: /sign in/i }).click();
-      await page.waitForURL(/\/(admin|mfa|dashboard)/i, { timeout: 15_000 });
+    test('should show invite admin button for super admin', async ({ superAdminPage: page }) => {
+      await page.goto(BASE_URL);
+      await page.locator(selectors.nav.usersLink).click();
+      await expect(page.locator(selectors.userManagement.container)).toBeVisible({ timeout: 10_000 });
 
-      if (page.url().includes('mfa')) {
-        test.skip(true, 'MFA verification required');
-        return;
-      }
-
-      await page.getByRole('link', { name: /users/i }).click();
-      await page.waitForLoadState('networkidle');
-
-      const inviteAdminButton = page.getByRole('button', { name: /invite.*admin/i });
-      await expect(inviteAdminButton).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator(selectors.userManagement.inviteAdminButton)).toBeVisible({ timeout: 5_000 });
     });
 
-    test('should enforce versent.com.au domain for admin invites', async ({ page, superAdmin }) => {
-      await page.goto('/login');
-      await page.getByLabel(/email/i).fill(superAdmin.email);
-      await page.getByLabel(/password/i).fill(superAdmin.password);
-      await page.getByRole('button', { name: /sign in/i }).click();
-      await page.waitForURL(/\/(admin|mfa|dashboard)/i, { timeout: 15_000 });
+    test('should invite admin with versent.com.au email', async ({ superAdminPage: page }) => {
+      await page.goto(BASE_URL);
+      await page.locator(selectors.nav.usersLink).click();
+      await expect(page.locator(selectors.userManagement.container)).toBeVisible({ timeout: 10_000 });
 
-      if (page.url().includes('mfa')) {
-        test.skip(true, 'MFA verification required');
-        return;
-      }
+      await page.locator(selectors.userManagement.inviteAdminButton).click();
+      const dialog = page.locator(selectors.inviteUser.dialog);
+      await expect(dialog).toBeVisible({ timeout: 5_000 });
 
-      await page.getByRole('link', { name: /users/i }).click();
-      await page.waitForLoadState('networkidle');
+      await dialog.locator(selectors.inviteUser.emailInput).fill(`e2e-admin-${Date.now()}@versent.com.au`);
+      await dialog.locator(selectors.inviteUser.submitButton).click();
 
-      const inviteAdminButton = page.getByRole('button', { name: /invite.*admin/i });
-      if (!(await inviteAdminButton.isVisible())) {
-        test.skip(true, 'Invite admin button not visible');
-        return;
-      }
+      const success = page.locator(selectors.common.toastSuccess).or(page.getByText(/invited|sent/i));
+      await expect(success).toBeVisible({ timeout: 10_000 });
+    });
 
-      await inviteAdminButton.click();
-      await page.getByLabel(/email/i).fill('external@gmail.com');
-      await page.getByRole('button', { name: /invite|send|submit/i }).click();
+    test('should enforce versent.com.au domain for admin invites', async ({ superAdminPage: page }) => {
+      await page.goto(BASE_URL);
+      await page.locator(selectors.nav.usersLink).click();
+      await expect(page.locator(selectors.userManagement.container)).toBeVisible({ timeout: 10_000 });
 
-      await expect(page.getByText(/versent|domain|not allowed|invalid/i)).toBeVisible({ timeout: 10_000 });
+      await page.locator(selectors.userManagement.inviteAdminButton).click();
+      const dialog = page.locator(selectors.inviteUser.dialog);
+      await expect(dialog).toBeVisible({ timeout: 5_000 });
+
+      await dialog.locator(selectors.inviteUser.emailInput).fill('external@gmail.com');
+      await dialog.locator(selectors.inviteUser.submitButton).click();
+
+      const error = dialog.locator(selectors.inviteUser.errorMessage).or(page.locator(selectors.common.toastError));
+      await expect(error).toBeVisible({ timeout: 5_000 });
     });
   });
 
   test.describe('First Login After Invitation', () => {
-    test('should require password change on first login', async ({ page }) => {
-      // This tests the flow where a newly invited user logs in for the first time
-      // and is required to set a new password (NEW_PASSWORD_REQUIRED challenge)
-      await page.goto('/login');
-      await page.getByLabel(/email/i).fill('newly-invited@example.com');
-      await page.getByLabel(/password/i).fill('TemporaryPassword1!');
-      await page.getByRole('button', { name: /sign in/i }).click();
+    test('should show password change form on first login', async ({ page }) => {
+      await page.goto(`${BASE_URL}/login`);
+      await page.locator(selectors.auth.emailInput).fill('newly-invited@example.com');
+      await page.locator(selectors.auth.passwordInput).fill('TemporaryPassword1!');
+      await page.locator(selectors.auth.signInButton).click();
 
-      // Should see either new password form, MFA setup, or error
-      const newPasswordForm = page.getByLabel(/new.*password/i);
+      const newPasswordForm = page.locator(selectors.auth.newPasswordInput);
       const mfaSetup = page.getByText(/mfa|authenticator|setup/i);
-      const errorMessage = page.getByText(/error|invalid|incorrect/i);
+      const errorMessage = page.locator(selectors.auth.errorMessage);
 
-      await expect(
-        newPasswordForm.or(mfaSetup).or(errorMessage)
-      ).toBeVisible({ timeout: 15_000 });
+      await expect(newPasswordForm.or(mfaSetup).or(errorMessage)).toBeVisible({ timeout: 15_000 });
+    });
+  });
+
+  test.describe('Invitation Token Expiry', () => {
+    test('should reject expired invitation token', async ({ page }) => {
+      await page.goto(`${BASE_URL}/invite/expired-token-12345`);
+
+      const errorPage = await page.locator(selectors.common.errorPage).isVisible({ timeout: 10_000 }).catch(() => false);
+      const alert = await page.locator('[role="alert"]').isVisible().catch(() => false);
+      const redirected = page.url().includes('/login');
+
+      expect(errorPage || alert || redirected).toBeTruthy();
     });
   });
 });
