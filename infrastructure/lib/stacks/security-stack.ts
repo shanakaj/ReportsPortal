@@ -20,6 +20,7 @@ export class SecurityStack extends cdk.Stack {
     const waf = new WafWebAcl(this, 'WebAcl', {
       name: `report-portal-waf-${environmentName}`,
       description: `WAF WebACL for Report Portal - ${environmentName}`,
+      scope: 'CLOUDFRONT',
       rateLimit: envConfig.wafRateLimit,
       allowedGeoLocations: envConfig.allowedGeoLocations,
     });

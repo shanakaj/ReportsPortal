@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
+import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
 import { EnvironmentConfig } from '../../bin/app';
@@ -10,6 +11,10 @@ export interface FrontendStackProps extends cdk.StackProps {
   environmentName: string;
   envConfig: EnvironmentConfig;
   webAclArn: string;
+  api: apigateway.IRestApi;
+  apiStageName: string;
+  originVerifyHeaderName: string;
+  originVerifyHeaderValue: string;
 }
 
 export class FrontendStack extends cdk.Stack {
@@ -21,7 +26,7 @@ export class FrontendStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: FrontendStackProps) {
     super(scope, id, props);
 
-    const { environmentName, envConfig, webAclArn } = props;
+    const { environmentName, envConfig, webAclArn, api, apiStageName, originVerifyHeaderName, originVerifyHeaderValue } = props;
     const isProd = environmentName === 'prod';
     const removalPolicy = isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY;
 
@@ -178,6 +183,39 @@ export class FrontendStack extends cdk.Stack {
       description: 'OAC for Report Serving bucket',
     });
 
+    // ========== API Gateway Origin (CloudFront → API Gateway) ==========
+
+    // Extract API Gateway domain from the REST API URL
+    // API GW URL format: https://{restApiId}.execute-api.{region}.amazonaws.com/{stage}
+    const apiDomainName = `${api.restApiId}.execute-api.${cdk.Aws.REGION}.amazonaws.com`;
+
+    const apiOrigin = new origins.HttpOrigin(apiDomainName, {
+      originPath: `/${apiStageName}`,
+      protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
+      customHeaders: {
+        [originVerifyHeaderName]: originVerifyHeaderValue,
+      },
+    });
+
+    // CloudFront Function to strip /api prefix before forwarding to API Gateway
+    // Request: /api/auth/login → origin receives /auth/login (with originPath prepending /{stage})
+    const apiPathRewrite = new cloudfront.Function(this, 'ApiPathRewrite', {
+      functionName: `report-portal-api-rewrite-${environmentName}`,
+      comment: 'Strip /api prefix from requests before forwarding to API Gateway',
+      code: cloudfront.FunctionCode.fromInline(`
+function handler(event) {
+  var request = event.request;
+  request.uri = request.uri.replace(/^\\/api/, '');
+  if (request.uri === '') request.uri = '/';
+  return request;
+}
+      `.trim()),
+      runtime: cloudfront.FunctionRuntime.JS_2_0,
+    });
+
+    // Use built-in no-cache policy for API requests
+    const apiCachePolicy = cloudfront.CachePolicy.CACHING_DISABLED;
+
     // ========== Portal CloudFront Distribution ==========
 
     this.portalDistribution = new cloudfront.Distribution(this, 'PortalDistribution', {
@@ -191,6 +229,22 @@ export class FrontendStack extends cdk.Stack {
         responseHeadersPolicy: portalSecurityHeaders,
         compress: true,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+      },
+      additionalBehaviors: {
+        '/api/*': {
+          origin: apiOrigin,
+          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          cachePolicy: apiCachePolicy,
+          allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+          originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+          compress: true,
+          functionAssociations: [
+            {
+              function: apiPathRewrite,
+              eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
+            },
+          ],
+        },
       },
       defaultRootObject: 'index.html',
       errorResponses: [

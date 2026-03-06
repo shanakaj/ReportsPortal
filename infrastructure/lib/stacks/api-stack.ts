@@ -9,9 +9,11 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
 import { EnvironmentConfig } from '../../bin/app';
 import { JavaLambdaFunction } from '../constructs/lambda-function-construct';
+import { WafWebAcl } from '../constructs/waf-construct';
 
 export interface ApiStackProps extends cdk.StackProps {
   environmentName: string;
@@ -36,6 +38,8 @@ export interface ApiStackProps extends cdk.StackProps {
 export class ApiStack extends cdk.Stack {
   public readonly api: apigateway.RestApi;
   public readonly lambdaFunctions: lambda.IFunction[];
+  public readonly originVerifyHeaderName: string;
+  public readonly originVerifyHeaderValue: string;
 
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
@@ -423,27 +427,48 @@ export class ApiStack extends cdk.Stack {
       authorizationType: apigateway.AuthorizationType.COGNITO,
     };
 
-    // Lambda integrations
+    // IAM role for API Gateway to invoke Lambda functions
+    // This replaces per-route Lambda permissions to avoid the 20KB resource policy limit
+    const apiGatewayRole = new iam.Role(this, 'ApiGatewayLambdaRole', {
+      roleName: `report-portal-apigw-lambda-${environmentName}`,
+      assumedBy: new iam.ServicePrincipal('apigateway.amazonaws.com'),
+      description: 'Role for API Gateway to invoke Lambda functions',
+    });
+
+    // Grant invoke on all function aliases
+    [authFunction, adminFunction, customerFunction, feedbackFunction,
+     analyticsFunction, auditFunction, notificationFunction].forEach(fn => {
+      fn.alias.grantInvoke(apiGatewayRole);
+    });
+
+    // Lambda integrations using credentials role (no per-route Lambda permissions)
     const authIntegration = new apigateway.LambdaIntegration(authFunction.alias, {
       proxy: true,
+      credentialsRole: apiGatewayRole,
     });
     const adminIntegration = new apigateway.LambdaIntegration(adminFunction.alias, {
       proxy: true,
+      credentialsRole: apiGatewayRole,
     });
     const customerIntegration = new apigateway.LambdaIntegration(customerFunction.alias, {
       proxy: true,
+      credentialsRole: apiGatewayRole,
     });
     const feedbackIntegration = new apigateway.LambdaIntegration(feedbackFunction.alias, {
       proxy: true,
+      credentialsRole: apiGatewayRole,
     });
     const analyticsIntegration = new apigateway.LambdaIntegration(analyticsFunction.alias, {
       proxy: true,
+      credentialsRole: apiGatewayRole,
     });
     const auditIntegration = new apigateway.LambdaIntegration(auditFunction.alias, {
       proxy: true,
+      credentialsRole: apiGatewayRole,
     });
     const notificationIntegration = new apigateway.LambdaIntegration(notificationFunction.alias, {
       proxy: true,
+      credentialsRole: apiGatewayRole,
     });
 
     // ========== Auth Endpoints (no Cognito authorizer - pre-auth) ==========
@@ -549,6 +574,27 @@ export class ApiStack extends cdk.Stack {
 
     const notificationById = notificationsResource.addResource('{notificationId}');
     notificationById.addResource('read').addMethod('PUT', notificationIntegration, authMethodOptions);
+
+    // ========== REGIONAL WAF for API Gateway (CloudFront origin verification) ==========
+
+    this.originVerifyHeaderName = 'x-origin-verify';
+    this.originVerifyHeaderValue = cdk.Fn.select(2, cdk.Fn.split('/', cdk.Aws.STACK_ID));
+
+    const apiWaf = new WafWebAcl(this, 'ApiWaf', {
+      name: `report-portal-api-waf-${environmentName}`,
+      description: `WAF WebACL for Report Portal API Gateway - ${environmentName}`,
+      scope: 'REGIONAL',
+      rateLimit: envConfig.wafRateLimit,
+      allowedGeoLocations: envConfig.allowedGeoLocations,
+      cloudFrontHeaderName: this.originVerifyHeaderName,
+      cloudFrontHeaderValue: this.originVerifyHeaderValue,
+    });
+
+    // Associate WAF with API Gateway stage
+    new wafv2.CfnWebACLAssociation(this, 'ApiWafAssociation', {
+      resourceArn: this.api.deploymentStage.stageArn,
+      webAclArn: apiWaf.webAclArn,
+    });
 
     // ========== Outputs ==========
     new cdk.CfnOutput(this, 'ApiUrl', {

@@ -5,6 +5,7 @@ import { Construct } from 'constructs';
 export interface WafWebAclProps {
   name: string;
   description: string;
+  scope: 'CLOUDFRONT' | 'REGIONAL';
   rateLimit: number;
   allowedGeoLocations: string[];
   cloudFrontHeaderName?: string;
@@ -21,6 +22,7 @@ export class WafWebAcl extends Construct {
     const {
       name,
       description,
+      scope: wafScope,
       rateLimit,
       allowedGeoLocations,
       cloudFrontHeaderName = 'x-origin-verify',
@@ -177,7 +179,7 @@ export class WafWebAcl extends Construct {
     this.webAcl = new wafv2.CfnWebACL(this, 'WebACL', {
       name,
       description,
-      scope: 'CLOUDFRONT',
+      scope: wafScope,
       defaultAction: { allow: {} },
       rules,
       visibilityConfig: {

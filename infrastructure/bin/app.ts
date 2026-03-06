@@ -120,6 +120,10 @@ const frontendStack = new FrontendStack(app, `${prefix}-Frontend`, {
   environmentName,
   envConfig,
   webAclArn: securityStack.webAclArn,
+  api: apiStack.api,
+  apiStageName: environmentName,
+  originVerifyHeaderName: apiStack.originVerifyHeaderName,
+  originVerifyHeaderValue: apiStack.originVerifyHeaderValue,
   tags: commonTags,
   crossRegionReferences: true,
   description: `Report Portal Frontend Stack (${environmentName})`,
@@ -149,6 +153,7 @@ apiStack.addDependency(authStack);
 apiStack.addDependency(storageStack);
 apiStack.addDependency(eventsStack);
 frontendStack.addDependency(securityStack);
+frontendStack.addDependency(apiStack);
 monitoringStack.addDependency(apiStack);
 
 app.synth();
