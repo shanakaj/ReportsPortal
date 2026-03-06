@@ -1,0 +1,38 @@
+spring:
+  application:
+    name: notification-function
+  main:
+    web-application-type: servlet
+  cloud:
+    function:
+      definition: eventBridgeHandler
+
+cognito:
+  user-pool-id: ${COGNITO_USER_POOL_ID:ap-southeast-2_placeholder}
+  client-id: ${COGNITO_CLIENT_ID:placeholder}
+  region: ${AWS_REGION:ap-southeast-2}
+
+aws:
+  region: ${AWS_REGION:ap-southeast-2}
+
+dynamodb:
+  endpoint: ${DYNAMODB_ENDPOINT:}
+  tables:
+    users: ${USERS_TABLE:ReportPortal-Users}
+    notifications: ${NOTIFICATIONS_TABLE:ReportPortal-Notifications}
+    feedback-threads: ${FEEDBACK_THREADS_TABLE:ReportPortal-FeedbackThreads}
+    audit-log: ${AUDIT_LOG_TABLE:ReportPortal-AuditLog}
+
+ses:
+  from-address: ${SES_FROM_ADDRESS:noreply@reports.yourdomain.com}
+
+eventbridge:
+  bus-name: ${EVENT_BUS_NAME:report-portal-events}
+  source: com.versent.reportportal
+
+portal:
+  base-url: ${PORTAL_BASE_URL:https://admin.yourdomain.com}
+
+logging:
+  level:
+    com.versent.reportportal: INFO

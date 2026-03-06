@@ -1,0 +1,164 @@
+version: '3.8'
+
+services:
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: report-portal-dynamodb
+    ports:
+      - "8000:8000"
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    volumes:
+      - dynamodb-data:/home/dynamodblocal/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:8000 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  dynamodb-admin:
+    image: aaronshaf/dynamodb-admin:latest
+    container_name: report-portal-dynamodb-admin
+    ports:
+      - "8001:8001"
+    environment:
+      DYNAMO_ENDPOINT: http://dynamodb-local:8000
+      AWS_REGION: ap-southeast-2
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+    depends_on:
+      dynamodb-local:
+        condition: service_healthy
+
+  dynamodb-setup:
+    image: amazon/aws-cli:latest
+    container_name: report-portal-dynamodb-setup
+    depends_on:
+      dynamodb-local:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      AWS_DEFAULT_REGION: ap-southeast-2
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        # Users Table
+        aws dynamodb create-table --endpoint-url http://dynamodb-local:8000 \
+          --table-name Users \
+          --attribute-definitions \
+            AttributeName=PK,AttributeType=S \
+            AttributeName=SK,AttributeType=S \
+          --key-schema \
+            AttributeName=PK,KeyType=HASH \
+            AttributeName=SK,KeyType=RANGE \
+          --billing-mode PAY_PER_REQUEST || true
+
+        # Spaces Table
+        aws dynamodb create-table --endpoint-url http://dynamodb-local:8000 \
+          --table-name Spaces \
+          --attribute-definitions \
+            AttributeName=PK,AttributeType=S \
+            AttributeName=SK,AttributeType=S \
+            AttributeName=spaceName,AttributeType=S \
+          --key-schema \
+            AttributeName=PK,KeyType=HASH \
+            AttributeName=SK,KeyType=RANGE \
+          --global-secondary-indexes \
+            '[{"IndexName":"spaceName-index","KeySchema":[{"AttributeName":"spaceName","KeyType":"HASH"}],"Projection":{"ProjectionType":"ALL"}}]' \
+          --billing-mode PAY_PER_REQUEST || true
+
+        # Reports Table
+        aws dynamodb create-table --endpoint-url http://dynamodb-local:8000 \
+          --table-name Reports \
+          --attribute-definitions \
+            AttributeName=PK,AttributeType=S \
+            AttributeName=SK,AttributeType=S \
+          --key-schema \
+            AttributeName=PK,KeyType=HASH \
+            AttributeName=SK,KeyType=RANGE \
+          --billing-mode PAY_PER_REQUEST || true
+
+        # Invitations Table
+        aws dynamodb create-table --endpoint-url http://dynamodb-local:8000 \
+          --table-name Invitations \
+          --attribute-definitions \
+            AttributeName=PK,AttributeType=S \
+            AttributeName=SK,AttributeType=S \
+          --key-schema \
+            AttributeName=PK,KeyType=HASH \
+            AttributeName=SK,KeyType=RANGE \
+          --billing-mode PAY_PER_REQUEST || true
+
+        # AuditLog Table
+        aws dynamodb create-table --endpoint-url http://dynamodb-local:8000 \
+          --table-name AuditLog \
+          --attribute-definitions \
+            AttributeName=PK,AttributeType=S \
+            AttributeName=SK,AttributeType=S \
+          --key-schema \
+            AttributeName=PK,KeyType=HASH \
+            AttributeName=SK,KeyType=RANGE \
+          --billing-mode PAY_PER_REQUEST || true
+
+        # Analytics Table
+        aws dynamodb create-table --endpoint-url http://dynamodb-local:8000 \
+          --table-name Analytics \
+          --attribute-definitions \
+            AttributeName=PK,AttributeType=S \
+            AttributeName=SK,AttributeType=S \
+            AttributeName=reportKey,AttributeType=S \
+            AttributeName=timestamp,AttributeType=S \
+          --key-schema \
+            AttributeName=PK,KeyType=HASH \
+            AttributeName=SK,KeyType=RANGE \
+          --global-secondary-indexes \
+            '[{"IndexName":"report-analytics-index","KeySchema":[{"AttributeName":"reportKey","KeyType":"HASH"},{"AttributeName":"timestamp","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}]' \
+          --billing-mode PAY_PER_REQUEST || true
+
+        # Notifications Table
+        aws dynamodb create-table --endpoint-url http://dynamodb-local:8000 \
+          --table-name Notifications \
+          --attribute-definitions \
+            AttributeName=PK,AttributeType=S \
+            AttributeName=SK,AttributeType=S \
+            AttributeName=createdAt,AttributeType=S \
+          --key-schema \
+            AttributeName=PK,KeyType=HASH \
+            AttributeName=SK,KeyType=RANGE \
+          --global-secondary-indexes \
+            '[{"IndexName":"unread-index","KeySchema":[{"AttributeName":"PK","KeyType":"HASH"},{"AttributeName":"createdAt","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}]' \
+          --billing-mode PAY_PER_REQUEST || true
+
+        # FeedbackThreads Table
+        aws dynamodb create-table --endpoint-url http://dynamodb-local:8000 \
+          --table-name FeedbackThreads \
+          --attribute-definitions \
+            AttributeName=PK,AttributeType=S \
+            AttributeName=SK,AttributeType=S \
+            AttributeName=reportKey,AttributeType=S \
+            AttributeName=spaceKey,AttributeType=S \
+            AttributeName=statusKey,AttributeType=S \
+            AttributeName=lastMessageAt,AttributeType=S \
+          --key-schema \
+            AttributeName=PK,KeyType=HASH \
+            AttributeName=SK,KeyType=RANGE \
+          --global-secondary-indexes \
+            '[{"IndexName":"report-threads-index","KeySchema":[{"AttributeName":"reportKey","KeyType":"HASH"},{"AttributeName":"lastMessageAt","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},{"IndexName":"space-threads-index","KeySchema":[{"AttributeName":"spaceKey","KeyType":"HASH"},{"AttributeName":"lastMessageAt","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},{"IndexName":"status-index","KeySchema":[{"AttributeName":"statusKey","KeyType":"HASH"},{"AttributeName":"lastMessageAt","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}]' \
+          --billing-mode PAY_PER_REQUEST || true
+
+        # FeedbackMessages Table
+        aws dynamodb create-table --endpoint-url http://dynamodb-local:8000 \
+          --table-name FeedbackMessages \
+          --attribute-definitions \
+            AttributeName=PK,AttributeType=S \
+            AttributeName=SK,AttributeType=S \
+          --key-schema \
+            AttributeName=PK,KeyType=HASH \
+            AttributeName=SK,KeyType=RANGE \
+          --billing-mode PAY_PER_REQUEST || true
+
+        echo "All DynamoDB tables created successfully"
+
+volumes:
+  dynamodb-data:

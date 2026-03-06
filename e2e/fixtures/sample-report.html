@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>E2E Test Report — Cloud Assessment</title>
+  <style>
+    :root {
+      --bg: #ffffff; --text: #1a1a2e; --accent: #6c63ff;
+      --card-bg: #f8f9fa; --border: #dee2e6; --tab-active: #6c63ff;
+    }
+    [data-theme="dark"] {
+      --bg: #1a1a2e; --text: #e0e0e0; --accent: #7c73ff;
+      --card-bg: #16213e; --border: #2a2a4a; --tab-active: #7c73ff;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+    header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 2rem; border-bottom: 2px solid var(--border); }
+    header h1 { font-size: 1.5rem; }
+    #theme-toggle { cursor: pointer; padding: 0.5rem 1rem; border: 1px solid var(--border); border-radius: 4px; background: var(--card-bg); color: var(--text); }
+    nav { display: flex; gap: 0; border-bottom: 2px solid var(--border); background: var(--card-bg); }
+    nav a { padding: 0.75rem 1.5rem; text-decoration: none; color: var(--text); border-bottom: 3px solid transparent; transition: all 0.2s; }
+    nav a:hover { background: var(--bg); }
+    nav a.active { border-bottom-color: var(--tab-active); font-weight: 600; color: var(--accent); }
+    .tab-content { display: none; padding: 2rem; min-height: 60vh; }
+    .tab-content.active { display: block; }
+    .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; }
+    .score { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 20px; font-weight: 600; }
+    .score.high { background: #d4edda; color: #155724; }
+    .score.medium { background: #fff3cd; color: #856404; }
+    .score.low { background: #f8d7da; color: #721c24; }
+    table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+    th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid var(--border); }
+    th { background: var(--card-bg); font-weight: 600; }
+    .mermaid-placeholder { background: var(--card-bg); border: 2px dashed var(--border); border-radius: 8px; padding: 2rem; text-align: center; color: var(--text); margin: 1rem 0; }
+    footer { text-align: center; padding: 1rem; border-top: 1px solid var(--border); font-size: 0.875rem; opacity: 0.7; }
+    @media print { nav, #theme-toggle, footer { display: none; } .tab-content { display: block !important; page-break-before: always; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Cloud Assessment Report</h1>
+    <button id="theme-toggle">Toggle Theme</button>
+  </header>
+  <nav id="tab-nav">
+    <a href="#tab-executive" class="active" data-tab="tab-executive">Executive Summary</a>
+    <a href="#tab-risk" data-tab="tab-risk">Risk Register</a>
+    <a href="#tab-recommendations" data-tab="tab-recommendations">Recommendations</a>
+  </nav>
+
+  <div id="tab-executive" class="tab-content active">
+    <h2>Executive Summary</h2>
+    <div class="card">
+      <h3>Overall Maturity Score</h3>
+      <p>Current cloud maturity: <span class="score high">4.2 / 5.0</span></p>
+      <p>Assessment period: January 2026 — March 2026</p>
+    </div>
+    <div class="card">
+      <h3>Key Findings</h3>
+      <ul>
+        <li>Infrastructure automation coverage: 87%</li>
+        <li>Security posture score: 92/100</li>
+        <li>Cost optimisation potential: 23% reduction achievable</li>
+        <li>Disaster recovery RTO: 4 hours (target: 2 hours)</li>
+      </ul>
+    </div>
+    <div class="mermaid-placeholder" data-testid="mermaid-diagram">
+      <p>[Architecture Diagram — Mermaid rendered at runtime]</p>
+      <pre class="mermaid">
+graph TD
+    A[Users] --> B[CloudFront]
+    B --> C[API Gateway]
+    C --> D[Lambda]
+    D --> E[DynamoDB]
+    D --> F[S3]
+      </pre>
+    </div>
+  </div>
+
+  <div id="tab-risk" class="tab-content">
+    <h2>Risk Register</h2>
+    <table>
+      <thead>
+        <tr><th>Risk ID</th><th>Description</th><th>Severity</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>R-001</td><td>Single region deployment — no DR</td><td><span class="score low">High</span></td><td>Open</td></tr>
+        <tr><td>R-002</td><td>Unencrypted data at rest in legacy bucket</td><td><span class="score medium">Medium</span></td><td>In Progress</td></tr>
+        <tr><td>R-003</td><td>IAM roles with excessive permissions</td><td><span class="score medium">Medium</span></td><td>Open</td></tr>
+        <tr><td>R-004</td><td>Missing CloudTrail in secondary account</td><td><span class="score low">High</span></td><td>Open</td></tr>
+        <tr><td>R-005</td><td>Outdated Lambda runtimes (Node 14)</td><td><span class="score high">Low</span></td><td>Resolved</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div id="tab-recommendations" class="tab-content">
+    <h2>Recommendations</h2>
+    <div class="card">
+      <h3>Phase 1 — Immediate (0-30 days)</h3>
+      <ul>
+        <li>Enable S3 default encryption on all buckets</li>
+        <li>Enable CloudTrail in all accounts and regions</li>
+        <li>Upgrade Lambda runtimes to Node 20 / Python 3.12</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Phase 2 — Short-term (30-90 days)</h3>
+      <ul>
+        <li>Implement multi-region active-passive DR</li>
+        <li>Reduce IAM permissions to least privilege</li>
+        <li>Deploy AWS Config rules for compliance monitoring</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Phase 3 — Medium-term (90-180 days)</h3>
+      <ul>
+        <li>Migrate to container-based workloads (ECS Fargate)</li>
+        <li>Implement FinOps practices with Cost Explorer automation</li>
+        <li>Deploy centralised logging with OpenSearch</li>
+      </ul>
+    </div>
+  </div>
+
+  <footer>
+    <p>Generated for E2E testing purposes</p>
+  </footer>
+
+  <script>
+    // Tab navigation via hash
+    function activateTab(hash) {
+      var tabId = hash.replace('#', '');
+      document.querySelectorAll('.tab-content').forEach(function(el) { el.classList.remove('active'); });
+      document.querySelectorAll('#tab-nav a').forEach(function(el) { el.classList.remove('active'); });
+      var target = document.getElementById(tabId);
+      if (target) {
+        target.classList.add('active');
+        var link = document.querySelector('#tab-nav a[data-tab="' + tabId + '"]');
+        if (link) link.classList.add('active');
+      }
+    }
+
+    // Listen for hash changes
+    window.addEventListener('hashchange', function() {
+      activateTab(window.location.hash);
+    });
+
+    // Handle initial hash on load
+    if (window.location.hash) {
+      activateTab(window.location.hash);
+    }
+
+    // Tab click handlers
+    document.querySelectorAll('#tab-nav a').forEach(function(link) {
+      link.addEventListener('click', function(e) {
+        e.preventDefault();
+        var hash = this.getAttribute('href');
+        window.location.hash = hash;
+      });
+    });
+
+    // Theme toggle
+    document.getElementById('theme-toggle').addEventListener('click', function() {
+      var html = document.documentElement;
+      var current = html.getAttribute('data-theme');
+      html.setAttribute('data-theme', current === 'dark' ? 'light' : 'dark');
+    });
+  </script>
+</body>
+</html>

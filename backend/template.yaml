@@ -1,0 +1,268 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SAM template for local development only (infrastructure is managed by CDK)
+
+Globals:
+  Function:
+    Runtime: java21
+    Timeout: 30
+    MemorySize: 512
+    Environment:
+      Variables:
+        DYNAMODB_ENDPOINT: http://host.docker.internal:8000
+        AWS_REGION: ap-southeast-2
+        COGNITO_USER_POOL_ID: local
+        COGNITO_CLIENT_ID: local
+        SES_SENDER_EMAIL: noreply@localhost
+        EVENTBRIDGE_BUS_NAME: report-portal-events
+        SPRING_PROFILES_ACTIVE: local
+
+Resources:
+  AuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      CodeUri: auth-function/target/auth-function-1.0.0.jar
+      Events:
+        Login:
+          Type: Api
+          Properties:
+            Path: /auth/login
+            Method: post
+        MfaVerify:
+          Type: Api
+          Properties:
+            Path: /auth/mfa-verify
+            Method: post
+        ForgotPassword:
+          Type: Api
+          Properties:
+            Path: /auth/forgot-password
+            Method: post
+        ChangePassword:
+          Type: Api
+          Properties:
+            Path: /auth/change-password
+            Method: post
+        FirstLogin:
+          Type: Api
+          Properties:
+            Path: /auth/first-login
+            Method: post
+
+  AdminFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      CodeUri: admin-function/target/admin-function-1.0.0.jar
+      Events:
+        ListSpaces:
+          Type: Api
+          Properties:
+            Path: /admin/spaces
+            Method: get
+        CreateSpace:
+          Type: Api
+          Properties:
+            Path: /admin/spaces
+            Method: post
+        DeleteSpace:
+          Type: Api
+          Properties:
+            Path: /admin/spaces/{spaceId}
+            Method: delete
+        UploadReport:
+          Type: Api
+          Properties:
+            Path: /admin/spaces/{spaceId}/reports
+            Method: post
+        ListReports:
+          Type: Api
+          Properties:
+            Path: /admin/spaces/{spaceId}/reports
+            Method: get
+        DeleteReport:
+          Type: Api
+          Properties:
+            Path: /admin/spaces/{spaceId}/reports/{reportId}
+            Method: delete
+        InviteCustomer:
+          Type: Api
+          Properties:
+            Path: /admin/spaces/{spaceId}/invite
+            Method: post
+        ListUsers:
+          Type: Api
+          Properties:
+            Path: /admin/users
+            Method: get
+        DisableUser:
+          Type: Api
+          Properties:
+            Path: /admin/users/{userId}/disable
+            Method: put
+        EnableUser:
+          Type: Api
+          Properties:
+            Path: /admin/users/{userId}/enable
+            Method: put
+        DeleteUser:
+          Type: Api
+          Properties:
+            Path: /admin/users/{userId}
+            Method: delete
+        ResetMfa:
+          Type: Api
+          Properties:
+            Path: /admin/users/{userId}/reset-mfa
+            Method: put
+        InviteAdmin:
+          Type: Api
+          Properties:
+            Path: /admin/invite-admin
+            Method: post
+        StartImpersonation:
+          Type: Api
+          Properties:
+            Path: /admin/impersonate/{userId}
+            Method: post
+        EndImpersonation:
+          Type: Api
+          Properties:
+            Path: /admin/impersonate
+            Method: delete
+
+  CustomerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      CodeUri: customer-function/target/customer-function-1.0.0.jar
+      Events:
+        ListSpaces:
+          Type: Api
+          Properties:
+            Path: /customer/spaces
+            Method: get
+        ListReports:
+          Type: Api
+          Properties:
+            Path: /customer/spaces/{spaceId}/reports
+            Method: get
+        GetReport:
+          Type: Api
+          Properties:
+            Path: /customer/spaces/{spaceId}/reports/{reportId}
+            Method: get
+        UpdatePreferences:
+          Type: Api
+          Properties:
+            Path: /customer/preferences
+            Method: put
+
+  FeedbackFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      CodeUri: feedback-function/target/feedback-function-1.0.0.jar
+      Events:
+        ListThreads:
+          Type: Api
+          Properties:
+            Path: /spaces/{spaceId}/reports/{reportId}/feedback
+            Method: get
+        CreateThread:
+          Type: Api
+          Properties:
+            Path: /spaces/{spaceId}/reports/{reportId}/feedback
+            Method: post
+        GetThread:
+          Type: Api
+          Properties:
+            Path: /feedback/threads/{threadId}
+            Method: get
+        ReplyThread:
+          Type: Api
+          Properties:
+            Path: /feedback/threads/{threadId}/reply
+            Method: post
+        UpdateStatus:
+          Type: Api
+          Properties:
+            Path: /feedback/threads/{threadId}/status
+            Method: put
+        UploadAttachment:
+          Type: Api
+          Properties:
+            Path: /feedback/threads/{threadId}/attachments
+            Method: post
+        AdminInbox:
+          Type: Api
+          Properties:
+            Path: /admin/feedback/inbox
+            Method: get
+        AdminInboxCount:
+          Type: Api
+          Properties:
+            Path: /admin/feedback/inbox/count
+            Method: get
+
+  AnalyticsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      CodeUri: analytics-function/target/analytics-function-1.0.0.jar
+      Events:
+        SpaceAnalytics:
+          Type: Api
+          Properties:
+            Path: /admin/analytics/spaces/{spaceId}
+            Method: get
+        UserAnalytics:
+          Type: Api
+          Properties:
+            Path: /admin/analytics/users/{userId}
+            Method: get
+        ExportAnalytics:
+          Type: Api
+          Properties:
+            Path: /admin/analytics/export
+            Method: post
+
+  AuditFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      CodeUri: audit-function/target/audit-function-1.0.0.jar
+      Events:
+        QueryAuditLog:
+          Type: Api
+          Properties:
+            Path: /admin/audit-log
+            Method: get
+
+  NotificationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      CodeUri: notification-function/target/notification-function-1.0.0.jar
+      Events:
+        ListNotifications:
+          Type: Api
+          Properties:
+            Path: /notifications
+            Method: get
+        MarkRead:
+          Type: Api
+          Properties:
+            Path: /notifications/{notificationId}/read
+            Method: put
+        MarkAllRead:
+          Type: Api
+          Properties:
+            Path: /notifications/read-all
+            Method: put
+        GetCount:
+          Type: Api
+          Properties:
+            Path: /notifications/count
+            Method: get
