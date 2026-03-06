@@ -28,7 +28,7 @@ import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityPr
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminDisableUserRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminEnableUserRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminDeleteUserRequest;
-import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminSetUserMFAPreferenceRequest;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminSetUserMfaPreferenceRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.SMSMfaSettingsType;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.SoftwareTokenMfaSettingsType;
 
@@ -229,7 +229,7 @@ public class UserManagementService {
         SecurityContext.AuthenticatedUser currentUser = SecurityContext.getCurrentUser();
         UserEntity user = getUser(userId);
 
-        cognitoClient.adminSetUserMFAPreference(AdminSetUserMFAPreferenceRequest.builder()
+        cognitoClient.adminSetUserMFAPreference(AdminSetUserMfaPreferenceRequest.builder()
                 .userPoolId(userPoolId)
                 .username(user.getEmail())
                 .softwareTokenMfaSettings(SoftwareTokenMfaSettingsType.builder()

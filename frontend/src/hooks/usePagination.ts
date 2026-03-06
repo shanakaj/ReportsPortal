@@ -1,4 +1,4 @@
-import { useInfiniteQuery, type UseInfiniteQueryOptions } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import type { PaginatedResponse } from '@/types';
 
 interface UsePaginationOptions<T> {
@@ -8,14 +8,14 @@ interface UsePaginationOptions<T> {
 }
 
 export function usePagination<T>({ queryKey, queryFn, enabled = true }: UsePaginationOptions<T>) {
-  const query = useInfiniteQuery<PaginatedResponse<T>, Error>({
+  const query = useInfiniteQuery({
     queryKey,
     queryFn: ({ pageParam }) => queryFn(pageParam as string | undefined),
     initialPageParam: undefined as string | undefined,
-    getNextPageParam: (lastPage) =>
+    getNextPageParam: (lastPage: PaginatedResponse<T>) =>
       lastPage.hasMore ? lastPage.nextCursor : undefined,
     enabled,
-  } as UseInfiniteQueryOptions<PaginatedResponse<T>, Error>);
+  });
 
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
 

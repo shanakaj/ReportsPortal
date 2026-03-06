@@ -14,7 +14,6 @@ import {
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { useAuth } from '@/hooks/useAuth';
 import { Role, type User } from '@/types';
-import { setTokens } from '@/services/api';
 import { formatDistanceToNow } from 'date-fns';
 
 interface UserListProps {

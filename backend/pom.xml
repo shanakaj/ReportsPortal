@@ -42,6 +42,8 @@
         <logstash-logback.version>7.4</logstash-logback.version>
         <aws-lambda-events.version>3.11.6</aws-lambda-events.version>
         <aws-lambda-core.version>1.2.3</aws-lambda-core.version>
+        <byte-buddy.version>1.15.11</byte-buddy.version>
+        <mockito.version>5.14.2</mockito.version>
     </properties>
 
     <dependencyManagement>
@@ -114,6 +116,18 @@
                 <configuration>
                     <source>21</source>
                     <target>21</target>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>
+                        -XX:+EnableDynamicAgentLoading
+                        --add-opens java.base/java.lang=ALL-UNNAMED
+                        --add-opens java.base/java.util=ALL-UNNAMED
+                        --add-opens java.base/java.lang.reflect=ALL-UNNAMED
+                    </argLine>
                 </configuration>
             </plugin>
         </plugins>

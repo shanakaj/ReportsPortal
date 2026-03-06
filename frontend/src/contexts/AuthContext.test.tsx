@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider, AuthContext } from './AuthContext';
-import React, { useContext } from 'react';
+import { useContext } from 'react';
 
 // Mock the auth service
 vi.mock('@/services/auth', () => ({

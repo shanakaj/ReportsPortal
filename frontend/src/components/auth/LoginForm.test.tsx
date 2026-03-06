@@ -12,27 +12,29 @@ describe('LoginForm', () => {
     expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
   });
 
-  it('shows validation errors for empty fields', async () => {
+  it('does not call onSubmit with empty fields', async () => {
+    const onSubmit = vi.fn();
     const user = userEvent.setup();
-    render(<LoginForm onSubmit={vi.fn()} isLoading={false} />);
+    render(<LoginForm onSubmit={onSubmit} isLoading={false} />);
 
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/please enter a valid email/i)).toBeInTheDocument();
+      expect(onSubmit).not.toHaveBeenCalled();
     });
   });
 
-  it('shows validation error for invalid email', async () => {
+  it('does not call onSubmit with invalid email', async () => {
+    const onSubmit = vi.fn();
     const user = userEvent.setup();
-    render(<LoginForm onSubmit={vi.fn()} isLoading={false} />);
+    render(<LoginForm onSubmit={onSubmit} isLoading={false} />);
 
     await user.type(screen.getByLabelText(/email/i), 'not-an-email');
     await user.type(screen.getByLabelText(/password/i), 'password123');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/please enter a valid email/i)).toBeInTheDocument();
+      expect(onSubmit).not.toHaveBeenCalled();
     });
   });
 

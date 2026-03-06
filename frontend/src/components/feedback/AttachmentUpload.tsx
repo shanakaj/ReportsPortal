@@ -87,11 +87,9 @@ export function AttachmentUpload({ threadId, onUploaded, disabled }: AttachmentU
   return (
     <div className="space-y-2">
       <label>
-        <Button variant="outline" size="sm" disabled={disabled} asChild>
-          <span className="cursor-pointer">
-            <Paperclip className="mr-1 h-3 w-3" />
-            Attach File
-          </span>
+        <Button variant="outline" size="sm" disabled={disabled} className="cursor-pointer">
+          <Paperclip className="mr-1 h-3 w-3" />
+          Attach File
         </Button>
         <input
           type="file"
