@@ -27,6 +27,94 @@ Build a **security-first**, multi-tenant AWS serverless application for deliveri
 
 **AWS-native principle:** Use AWS services wherever possible. No third-party SaaS dependencies — all compute, storage, messaging, email, and event handling via AWS services.
 
+### Architecture Diagram
+
+```mermaid
+flowchart TD
+    subgraph Internet
+        User["Browser / Client"]
+    end
+
+    subgraph Edge["AWS Edge Layer"]
+        WAF["AWS WAF\n7 Rule Groups"]
+        CF_SPA["CloudFront\nPortal SPA"]
+        CF_Reports["CloudFront\nReport Serving\n(Signed Cookies)"]
+    end
+
+    subgraph FrontendHost["Frontend Hosting"]
+        S3_SPA["S3 Bucket\nReact SPA"]
+    end
+
+    subgraph APILayer["API Layer"]
+        APIGW["API Gateway\nREST + Cognito Authorizer"]
+        Cognito["Cognito User Pool\nMFA Enforced"]
+    end
+
+    subgraph Compute["Compute Layer — Java 21 + SnapStart"]
+        Auth["Auth\nLambda"]
+        Admin["Admin\nLambda"]
+        Customer["Customer\nLambda"]
+        Feedback["Feedback\nLambda"]
+        Analytics["Analytics\nLambda"]
+        Audit["Audit\nLambda"]
+        Notification["Notification\nLambda"]
+        CognitoTrigger["Cognito\nTriggers"]
+    end
+
+    subgraph Storage["Data & Storage"]
+        DDB[("DynamoDB\n9 Tables")]
+        S3_Cust["S3 Buckets\nPer-Customer\n(KMS Encrypted)"]
+        S3_Feedback["S3 Bucket\nFeedback Attachments"]
+    end
+
+    subgraph Events["Event & Messaging"]
+        EB["EventBridge\nEvent Bus"]
+        SES["Amazon SES\nEmail Service"]
+    end
+
+    subgraph Monitoring
+        CW["CloudWatch\nLogs & Metrics"]
+        XRay["AWS X-Ray\nTracing"]
+        Alarms["CloudWatch\nAlarms"]
+    end
+
+    User --> WAF
+    WAF --> CF_SPA
+    WAF --> CF_Reports
+    CF_SPA --> S3_SPA
+    CF_Reports -->|OAC| S3_Cust
+    CF_SPA --> APIGW
+    APIGW --> Cognito
+    APIGW --> Auth & Admin & Customer & Feedback & Analytics & Audit
+    Cognito --> CognitoTrigger
+
+    Auth --> DDB
+    Auth --> Cognito
+    Admin --> DDB & S3_Cust & EB
+    Customer --> DDB & CF_Reports
+    Feedback --> DDB & S3_Feedback & EB
+    Analytics --> DDB
+    Audit --> DDB
+    Notification --> DDB & SES
+    EB --> Notification
+
+    Auth & Admin & Customer & Feedback --> CW
+    CW --> Alarms
+    CW --> XRay
+
+    classDef edge fill:#ff9900,stroke:#232f3e,color:#fff
+    classDef compute fill:#ed7100,stroke:#232f3e,color:#fff
+    classDef storage fill:#3b48cc,stroke:#232f3e,color:#fff
+    classDef event fill:#e7157b,stroke:#232f3e,color:#fff
+    classDef monitor fill:#2ea44f,stroke:#232f3e,color:#fff
+
+    class WAF,CF_SPA,CF_Reports edge
+    class Auth,Admin,Customer,Feedback,Analytics,Audit,Notification,CognitoTrigger compute
+    class DDB,S3_Cust,S3_SPA,S3_Feedback storage
+    class EB,SES event
+    class CW,XRay,Alarms monitor
+```
+
 ---
 
 ## Security Requirements — PRIORITY
@@ -69,6 +157,59 @@ Additional CloudFront security:
   - The frontend detects the `impersonator` claim and renders the impersonation banner + disables all write actions
   - The API layer rejects any write operations when `impersonator` claim is present
 
+### Authentication & Impersonation Flow
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Frontend as React SPA
+    participant APIGW as API Gateway
+    participant AuthLambda as Auth Lambda
+    participant Cognito
+
+    rect rgb(230, 245, 255)
+        Note over User,Cognito: Standard Login Flow
+        User->>Frontend: Enter email + password
+        Frontend->>APIGW: POST /auth/login
+        APIGW->>AuthLambda: Forward
+        AuthLambda->>Cognito: initiateAuth
+        alt MFA Required
+            Cognito-->>AuthLambda: SOFTWARE_TOKEN_MFA challenge
+            AuthLambda-->>Frontend: {challengeName, session}
+            User->>Frontend: Enter MFA code
+            Frontend->>APIGW: POST /auth/mfa-verify
+            APIGW->>AuthLambda: Forward
+            AuthLambda->>Cognito: respondToAuthChallenge
+        end
+        Cognito-->>AuthLambda: Tokens (access + id + refresh)
+        AuthLambda-->>Frontend: {accessToken, idToken, refreshToken, expiresIn}
+        Frontend->>Frontend: Store tokens in memory<br/>(NOT localStorage)
+    end
+
+    rect rgb(255, 240, 230)
+        Note over User,Cognito: First Login (NEW_PASSWORD_REQUIRED)
+        Cognito-->>AuthLambda: NEW_PASSWORD_REQUIRED challenge
+        AuthLambda-->>Frontend: {challengeName, session}
+        Frontend->>User: Show password reset + MFA setup
+        User->>Frontend: Set new password + configure TOTP
+        Frontend->>APIGW: POST /auth/first-login
+    end
+
+    rect rgb(245, 230, 255)
+        Note over User,Cognito: Impersonation (Super Admin Only)
+        User->>Frontend: Click "View as" on user
+        Frontend->>APIGW: POST /admin/impersonate/{userId}
+        APIGW->>AuthLambda: Validate super_admin role
+        AuthLambda->>AuthLambda: Generate scoped JWT<br/>(impersonator claim + read_only=true)
+        AuthLambda-->>Frontend: {accessToken} (5min TTL)
+        Frontend->>Frontend: Show impersonation banner<br/>Disable all write actions
+        Note over Frontend: POST/PUT/DELETE → 403 Forbidden
+        User->>Frontend: Click "Exit Impersonation"
+        Frontend->>APIGW: DELETE /admin/impersonate
+        Frontend->>Frontend: Restore super admin context
+    end
+```
+
 ### S3 Isolation (Per-Customer Bucket)
 
 - Each customer space gets a **dedicated S3 bucket** (not subfolders)
@@ -99,6 +240,46 @@ This means:
 4. The HTML sanitiser on upload must preserve the report's functional JS while stripping potentially harmful external calls
 
 ### Report Serving Flow (CRITICAL — end-to-end path)
+
+```mermaid
+sequenceDiagram
+    actor Customer
+    participant Frontend as React SPA
+    participant APIGW as API Gateway
+    participant Lambda as Customer Lambda
+    participant Cognito
+    participant CF as CloudFront<br/>(Report Serving)
+    participant S3 as S3 Bucket<br/>(Per-Customer)
+
+    Customer->>Frontend: Click "Open Report"
+    Frontend->>APIGW: GET /customer/spaces/{spaceId}/reports/{reportId}
+    APIGW->>Cognito: Validate JWT
+    Cognito-->>APIGW: Token valid
+    APIGW->>Lambda: Forward request
+    Lambda->>Lambda: Check user assigned to space
+    Lambda->>CF: Generate signed cookies<br/>(3-hour TTL, scoped to customer bucket path)
+    Lambda-->>Frontend: Report metadata + CloudFront URL + signed cookies
+
+    alt Full-Tab View (Default)
+        Frontend->>Frontend: Open /report/{spaceId}/{reportId} in new tab
+        Frontend->>CF: Load report HTML (with signed cookies)
+    else Embedded View
+        Frontend->>CF: Load report in sandboxed iframe
+    end
+
+    CF->>S3: Fetch via OAC
+    S3-->>CF: Report HTML
+    CF-->>Frontend: Report HTML (+ CSP headers)
+    Frontend->>Frontend: Render in sandboxed iframe<br/>(allow-scripts allow-same-origin)
+
+    Note over Frontend: Analytics bridge tracks tab navigation via hashchange
+
+    rect rgb(255, 230, 230)
+        Note over Customer,S3: Session Expiry (after 3 hours)
+        CF--xFrontend: 403 Forbidden (cookie expired)
+        Frontend->>Customer: Show overlay: "Session expired.<br/>Return to portal to re-authenticate."
+    end
+```
 
 This is the core flow for how a customer views a report:
 
@@ -152,6 +333,134 @@ This means the iframe **must allow scripts and same-origin** for the report to f
 
 ## Role Model
 
+### Role Hierarchy & Permissions
+
+```mermaid
+flowchart TD
+    SA["Super Admin\n@versent.com.au only"]
+    A["Admin\n@versent.com.au only\nInvitation only"]
+    C["Customer\nInvitation only"]
+
+    SA -->|"invites & manages"| A
+    SA -->|"invites & manages"| C
+    SA -->|"impersonates (read-only)"| A
+    SA -->|"impersonates (read-only)"| C
+    A -->|"invites & manages"| C
+
+    subgraph SA_Perms["Super Admin Permissions"]
+        direction LR
+        SA1["Create/Delete Spaces"]
+        SA2["Invite Admins"]
+        SA3["Impersonate Users"]
+        SA4["View All Audit Logs"]
+        SA5["Full Analytics"]
+        SA6["Manage All Users"]
+        SA7["Upload Reports"]
+    end
+
+    subgraph A_Perms["Admin Permissions"]
+        direction LR
+        A1["Manage Assigned Spaces"]
+        A2["Invite Customers"]
+        A3["Upload Reports"]
+        A4["Manage Feedback"]
+        A5["Space Analytics"]
+        A6["Space Audit Logs"]
+    end
+
+    subgraph C_Perms["Customer Permissions"]
+        direction LR
+        C1["View Reports"]
+        C2["Submit Feedback"]
+        C3["View Notifications"]
+    end
+
+    SA --- SA_Perms
+    A --- A_Perms
+    C --- C_Perms
+
+    classDef super fill:#7c3aed,stroke:#232f3e,color:#fff
+    classDef admin fill:#2563eb,stroke:#232f3e,color:#fff
+    classDef cust fill:#059669,stroke:#232f3e,color:#fff
+
+    class SA super
+    class A admin
+    class C cust
+```
+
+### Super Admin Journey
+
+```mermaid
+journey
+    title Super Admin Journey
+    section Authentication
+      Login with credentials: 5: Super Admin
+      Complete MFA challenge: 5: Super Admin
+    section Dashboard
+      View dashboard overview: 5: Super Admin
+    section Space Management
+      Create customer space: 5: Super Admin
+      Invite admin (versent.com.au only): 5: Super Admin
+      Invite customer to space: 5: Super Admin
+    section Report Management
+      Upload reports to space: 5: Super Admin
+      View report (embedded iframe): 5: Super Admin
+      View report (full-tab mode): 5: Super Admin
+    section Monitoring
+      View analytics dashboard: 5: Super Admin
+      View audit log: 5: Super Admin
+    section Impersonation
+      Impersonate customer (read-only): 3: Super Admin
+      Browse as customer: 3: Super Admin
+      Exit impersonation: 5: Super Admin
+```
+
+### Admin Journey
+
+```mermaid
+journey
+    title Admin Journey
+    section Authentication
+      Login with credentials: 5: Admin
+      Complete MFA challenge: 5: Admin
+    section Space Management
+      View assigned spaces: 5: Admin
+      Upload report to space: 5: Admin
+      Invite customer: 4: Admin
+    section User Management
+      Disable/Enable user: 4: Admin
+      Reset user MFA: 4: Admin
+    section Feedback
+      View feedback threads: 5: Admin
+      Reply to customer feedback: 5: Admin
+      Resolve feedback thread: 5: Admin
+    section Monitoring
+      View space analytics: 5: Admin
+      View space audit log: 5: Admin
+```
+
+### Customer Journey
+
+```mermaid
+journey
+    title Customer Journey
+    section Onboarding
+      Receive invitation email: 5: Customer
+      Accept invitation link: 5: Customer
+      Register (name, phone, company, password): 4: Customer
+      Setup MFA (TOTP): 4: Customer
+    section Authentication
+      First login with new credentials: 5: Customer
+    section Report Viewing
+      Browse assigned spaces: 5: Customer
+      Open report (full-tab default): 5: Customer
+      Navigate report tabs: 5: Customer
+    section Feedback
+      Submit feedback with attachment: 4: Customer
+      Receive reply notification: 5: Customer
+      View resolved feedback: 5: Customer
+```
+
 ### Super Admin
 
 - **Pre-seeded on first deployment**: `shanaka.jayasundera@versent.com.au` with temporary password `Admin123!`
@@ -196,6 +505,40 @@ This means the iframe **must allow scripts and same-origin** for the report to f
 ---
 
 ## Customer Invitation Flow
+
+```mermaid
+sequenceDiagram
+    actor Admin
+    participant API as API Gateway + Lambda
+    participant DDB as DynamoDB
+    participant SES as Amazon SES
+    participant Cognito
+    participant EB as EventBridge
+    participant NotifLambda as Notification Lambda
+    actor Customer
+
+    Admin->>API: POST /admin/spaces/{spaceId}/invite<br/>{email: "customer@example.com"}
+    API->>API: Domain mismatch check<br/>(warn if email domain ≠ space name)
+    API->>DDB: Store invitation (24hr TTL)
+    API->>SES: Send invitation email
+    SES-->>Customer: "You've been invited to access reports"
+
+    Customer->>Customer: Click invitation link
+    Customer->>API: Load registration form
+    Customer->>API: POST register<br/>{name, phone, company, password}
+    API->>Cognito: Create user + set custom attributes<br/>(role=customer, customer_space, invited_by)
+    Cognito-->>Customer: User created
+
+    Customer->>Cognito: Setup MFA (TOTP)
+    Cognito-->>Customer: MFA configured
+
+    Customer->>API: First login
+    API->>EB: Publish user.first_login event
+    EB->>NotifLambda: Trigger notification
+    NotifLambda->>DDB: Create in-app notification for inviting admin
+    NotifLambda->>SES: Send email to inviting admin
+    SES-->>Admin: "Customer has accepted invitation"
+```
 
 1. Admin/super admin enters customer email and selects target customer space
 2. **Domain mismatch warning**: If the customer's email domain doesn't match the customer space name, show a warning and require confirmation (e.g., inviting `user@aws.com` to "versent" space → warn). **Exception:** `@versent.com.au` emails never trigger the warning
@@ -429,6 +772,54 @@ Include: timestamp, actor (user ID + email), action, target resource, IP address
 - `GET /admin/feedback/inbox/count` — unread feedback count across all spaces (for badge)
 
 **Feedback notification flow (AWS-native):**
+
+```mermaid
+sequenceDiagram
+    actor Customer
+    actor Admin
+    participant API as API Lambda
+    participant DDB as DynamoDB
+    participant S3 as S3 Feedback Bucket
+    participant EB as EventBridge
+    participant NotifLambda as Notification Lambda
+    participant SES as Amazon SES
+
+    rect rgb(230, 245, 255)
+        Note over Customer,SES: Customer Creates Feedback
+        Customer->>API: POST /feedback (subject, message, attachments[])
+        API->>DDB: Store thread + message in FeedbackThreads/FeedbackMessages
+        opt Has attachments
+            API->>S3: Generate presigned PUT URL
+            Customer->>S3: Upload attachment (max 10MB, image/PDF)
+        end
+        API->>EB: Publish feedback.new event
+        EB->>NotifLambda: Trigger
+        NotifLambda->>DDB: Create notifications for all space admins
+        NotifLambda->>SES: Send HTML email to each space admin
+        SES-->>Admin: Email with feedback content + direct link
+    end
+
+    rect rgb(255, 245, 230)
+        Note over Customer,SES: Admin Replies
+        Admin->>API: POST /feedback/threads/{threadId}/reply
+        API->>DDB: Store reply message
+        API->>EB: Publish feedback.reply event
+        EB->>NotifLambda: Trigger
+        NotifLambda->>DDB: Create notification for customer
+        NotifLambda->>SES: Send HTML email to customer
+        SES-->>Customer: Email with reply content + link to thread
+    end
+
+    rect rgb(230, 255, 230)
+        Note over Customer,SES: Admin Resolves Thread
+        Admin->>API: PUT /feedback/threads/{threadId}/status {status: "resolved"}
+        API->>DDB: Update thread status
+        API->>EB: Publish feedback.resolved event
+        EB->>NotifLambda: Trigger
+        NotifLambda->>SES: Send resolution email to customer
+    end
+```
+
 1. Customer posts feedback → Lambda writes to DynamoDB → publishes event to **Amazon EventBridge**
 2. EventBridge rule matches `feedback.new` or `feedback.reply` events → triggers **notification Lambda**
 3. Notification Lambda: (a) writes in-app notifications to DynamoDB for all admins assigned to the space, (b) sends formatted HTML email via **SES** to each admin with report name, customer name, feedback preview, and direct link
@@ -496,6 +887,45 @@ Include: timestamp, actor (user ID + email), action, target resource, IP address
 
 All infrastructure defined in CDK. Key stacks/constructs:
 
+### CDK Stack Dependencies
+
+```mermaid
+flowchart TD
+    AuthStack["Auth Stack\nCognito User Pool\nApp Clients\nPre-signup Trigger"]
+    StorageStack["Storage Stack\nS3 Bucket Factory\nFeedback Bucket\nKMS Keys\nAudit Bucket"]
+    SecurityStack["Security Stack\nWAF WebACL\nWAF Rules\nSecurity Headers\nSigned Cookie Keys"]
+    EmailStack["Email Stack\nSES Domain\nEmail Templates\nBounce Handler"]
+    EventsStack["Events Stack\nEventBridge Bus\nFeedback Rules\nNotification Lambda"]
+    APIStack["API Stack\nAPI Gateway\nLambda Functions\nCognito Authorizer\nCORS Config"]
+    FrontendStack["Frontend Stack\nCloudFront (SPA)\nCloudFront (Reports)\nS3 Static Sites\nOAC"]
+    MonitoringStack["Monitoring Stack\nCloudWatch Dashboards\nAlarms\nX-Ray Config"]
+
+    AuthStack --> APIStack
+    StorageStack --> APIStack
+    StorageStack --> FrontendStack
+    SecurityStack --> FrontendStack
+    EmailStack --> EventsStack
+    AuthStack --> EventsStack
+    APIStack --> FrontendStack
+    APIStack --> MonitoringStack
+    EventsStack --> MonitoringStack
+
+    classDef auth fill:#7c3aed,stroke:#232f3e,color:#fff
+    classDef storage fill:#3b48cc,stroke:#232f3e,color:#fff
+    classDef security fill:#dc2626,stroke:#232f3e,color:#fff
+    classDef compute fill:#ed7100,stroke:#232f3e,color:#fff
+    classDef frontend fill:#ff9900,stroke:#232f3e,color:#fff
+    classDef monitor fill:#2ea44f,stroke:#232f3e,color:#fff
+
+    class AuthStack auth
+    class StorageStack storage
+    class SecurityStack security
+    class EmailStack,EventsStack compute
+    class APIStack compute
+    class FrontendStack frontend
+    class MonitoringStack monitor
+```
+
 - **Auth Stack:** Cognito User Pool, App Clients, custom attributes, pre-signup Lambda trigger (email domain validation)
 - **Storage Stack:** S3 bucket factory (creates per-customer buckets), feedback attachments bucket, KMS keys, audit bucket
 - **API Stack:** API Gateway, Lambda functions, Cognito authoriser, CORS configuration
@@ -516,6 +946,111 @@ Lambda trigger on Cognito that enforces:
 ---
 
 ## Data Model (DynamoDB)
+
+### Entity Relationship Diagram
+
+```mermaid
+erDiagram
+    USERS ||--o{ SPACES : "assigned to"
+    USERS ||--o{ INVITATIONS : "invited by"
+    USERS ||--o{ NOTIFICATIONS : "receives"
+    USERS ||--o{ AUDIT_LOG : "actor"
+    SPACES ||--o{ REPORTS : "contains"
+    SPACES ||--o{ INVITATIONS : "target space"
+    REPORTS ||--o{ FEEDBACK_THREADS : "has feedback"
+    FEEDBACK_THREADS ||--o{ FEEDBACK_MESSAGES : "contains"
+    SPACES ||--o{ ANALYTICS : "tracked in"
+    REPORTS ||--o{ ANALYTICS : "tracked for"
+
+    USERS {
+        string userId PK
+        string email
+        string fullName
+        string phone
+        string company
+        string role "super_admin | admin | customer"
+        string[] customerSpaces
+        string invitedBy
+        string status
+        boolean mfaEnabled
+        string preferredViewMode "embedded | full-tab"
+    }
+
+    SPACES {
+        string spaceId PK
+        string spaceName
+        string s3BucketName
+        string createdBy
+        string status
+    }
+
+    REPORTS {
+        string spaceId PK
+        string reportId SK
+        string fileName
+        string s3Key
+        string uploadedBy
+        number fileSize
+        string status
+    }
+
+    INVITATIONS {
+        string token PK
+        string email
+        string targetSpaceId
+        string role
+        string invitedBy
+        datetime expiresAt "TTL 24hr"
+        string status
+    }
+
+    AUDIT_LOG {
+        string date PK
+        string timestampEventId SK
+        string actor
+        string action
+        string target
+        string ipAddress
+        string result "TTL 2yr"
+    }
+
+    ANALYTICS {
+        string spaceIdDate PK
+        string timestampEventId SK
+        string userId
+        string reportId
+        string eventType
+        string tabHash
+        number durationSeconds "TTL 1yr"
+    }
+
+    NOTIFICATIONS {
+        string userId PK
+        string timestampNotifId SK
+        string type
+        string message
+        boolean read "TTL 90d"
+    }
+
+    FEEDBACK_THREADS {
+        string threadId PK
+        string spaceId
+        string reportId
+        string subject
+        string status "open | resolved | archived"
+        string createdBy
+        number messageCount
+    }
+
+    FEEDBACK_MESSAGES {
+        string threadId PK
+        string timestampMsgId SK
+        string authorId
+        string authorRole
+        string message "HTML rich text"
+        string[] attachments "S3 keys"
+    }
+```
 
 ### Tables:
 
@@ -578,6 +1113,44 @@ Lambda trigger on Cognito that enforces:
 ---
 
 ## Testing Strategy
+
+### Test Pyramid
+
+```mermaid
+flowchart TD
+    subgraph E2E["E2E Tests (Playwright)"]
+        E1["Super Admin Journey"]
+        E2["Admin Journey"]
+        E3["Customer Journey"]
+        E4["Feedback Lifecycle"]
+        E5["Security Boundaries"]
+        E6["Report Viewer"]
+        E7["Invitation Flow"]
+        E8["Auth Flows"]
+    end
+
+    subgraph Integration["Integration Tests"]
+        I1["API Tests\n(Auth, CRUD, Pagination)"]
+        I2["DynamoDB Local\n(Repository Layer)"]
+        I3["CDK Assertions\n(41 Assertions)"]
+    end
+
+    subgraph Unit["Unit Tests"]
+        U1["Backend: JUnit 5 + Mockito\n(Services, Security, Validators)"]
+        U2["Frontend: Vitest + RTL\n(Components, Hooks, Contexts)"]
+        U3["CDK: Jest\n(Stack Tests)"]
+    end
+
+    E2E --> Integration --> Unit
+
+    classDef e2e fill:#7c3aed,stroke:#232f3e,color:#fff
+    classDef integration fill:#2563eb,stroke:#232f3e,color:#fff
+    classDef unit fill:#059669,stroke:#232f3e,color:#fff
+
+    class E1,E2,E3,E4,E5,E6,E7,E8 e2e
+    class I1,I2,I3 integration
+    class U1,U2,U3 unit
+```
 
 ### Backend (Java / Spring Boot 3)
 - **Unit tests:** JUnit 5 + Mockito for all service classes, security filters, and validators. Minimum 80% coverage on business logic
@@ -679,6 +1252,57 @@ Lambda trigger on Cognito that enforces:
 ## CI/CD Pipeline — Issue-Driven Development Workflow
 
 The pipeline follows a **deploy → test → detect → fix → re-deploy** cycle. Every failure becomes a tracked GitHub issue, every fix is a PR linked to that issue.
+
+### Pipeline Flow
+
+```mermaid
+flowchart TD
+    A[Push to feature branch] --> B[Build & Lint]
+    B --> B1["Backend: mvn clean package"]
+    B --> B2["Frontend: npm build + lint"]
+    B --> B3["CDK: tsc + cdk synth"]
+
+    B1 & B2 & B3 --> C[Unit & Integration Tests]
+    C --> C1["Backend: mvn test\n(JUnit 5 + Mockito)"]
+    C --> C2["Frontend: vitest run\n(React Testing Library)"]
+    C --> C3["CDK: jest\n(CDK Assertions)"]
+
+    C1 & C2 & C3 --> D["Deploy to Dev\ncdk deploy --all\n--context environment=dev"]
+    D --> E[API Integration Tests]
+    E --> F["E2E UI Tests\n(Playwright)"]
+
+    F --> G{All Tests Pass?}
+
+    G -- Yes --> H[PR to main]
+    H --> I["Deploy to Staging\ncdk deploy --all\n--context environment=staging"]
+    I --> J["Full Test Suite\n(API + E2E + Security)"]
+    J --> K{Tests Pass?}
+
+    K -- Yes --> L["Manual Approval Gate"]
+    L --> M["Deploy to Prod\ncdk deploy --all\n--context environment=prod"]
+    M --> N["Smoke Tests\n(subset of E2E)"]
+
+    G -- No --> O["Create GitHub Issue\n[Pipeline] test-suite: test-name failed"]
+    K -- No --> O
+
+    O --> P["Create fix branch\nfix/{issue-number}-{desc}"]
+    P --> Q["Diagnose & Fix"]
+    Q --> R["PR targeting main\nCloses #{issue-number}"]
+    R --> S["Review & Merge"]
+    S --> A
+
+    classDef build fill:#3b82f6,stroke:#232f3e,color:#fff
+    classDef test fill:#8b5cf6,stroke:#232f3e,color:#fff
+    classDef deploy fill:#f59e0b,stroke:#232f3e,color:#fff
+    classDef gate fill:#ef4444,stroke:#232f3e,color:#fff
+    classDef fix fill:#10b981,stroke:#232f3e,color:#fff
+
+    class B,B1,B2,B3 build
+    class C,C1,C2,C3,E,F,J,N test
+    class D,I,M deploy
+    class G,K,L gate
+    class O,P,Q,R,S fix
+```
 
 ### Pipeline Stages (GitHub Actions)
 
