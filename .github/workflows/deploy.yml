@@ -176,3 +176,23 @@ jobs:
           echo "- **Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- **S3 Bucket:** ${{ steps.targets.outputs.spa_bucket }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Distribution:** ${{ steps.targets.outputs.distribution_id }}" >> "$GITHUB_STEP_SUMMARY"
+
+  # ─── Post-deployment verification ──────────────────────────────────
+  api-tests:
+    name: API Smoke Tests
+    needs: [deploy-frontend]
+    if: ${{ always() && needs.deploy-frontend.result == 'success' }}
+    uses: ./.github/workflows/api-tests.yml
+    with:
+      environment: ${{ inputs.environment }}
+    secrets: inherit
+
+  e2e-tests:
+    name: E2E Tests
+    needs: [deploy-frontend]
+    if: ${{ always() && needs.deploy-frontend.result == 'success' }}
+    uses: ./.github/workflows/e2e-tests.yml
+    with:
+      environment: ${{ inputs.environment }}
+      browser: chromium
+    secrets: inherit
