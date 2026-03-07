@@ -34,160 +34,152 @@ Report Portal provides a dedicated, secure channel where:
 
 ### Typical Workflow
 
-```
-1. Super Admin creates a customer space (e.g., "acme-corp")
-   --> Provisions isolated S3 bucket for report storage
-
-2. Admin uploads HTML report to the space
-   --> Report is sanitized, stored in S3, metadata saved to DynamoDB
-
-3. Admin invites customer (e.g., john@acme.com) to the space
-   --> Customer receives email with 24-hour invitation link
-
-4. Customer accepts invitation
-   --> Sets password, configures TOTP MFA via authenticator app
-
-5. Customer logs in and views reports
-   --> CloudFront signed cookies grant time-limited access to report files
-
-6. Customer submits feedback on a report
-   --> Admin receives email notification, replies in threaded conversation
+```mermaid
+flowchart LR
+    A["1. Super Admin\ncreates space"] --> B["2. Admin uploads\nHTML report"]
+    B --> C["3. Admin invites\ncustomer by email"]
+    C --> D["4. Customer accepts\n& sets up MFA"]
+    D --> E["5. Customer views\nreports via\nsigned cookies"]
+    E --> F["6. Customer submits\nfeedback on report"]
 ```
 
-### User Journeys
+## Architecture
 
-These journeys define the end-to-end flows for each role. They serve as both business documentation and the basis for E2E (Playwright) test scenarios.
-
-#### Journey 1: Super Admin
-
-The Super Admin has full control over the platform, including creating customer spaces, inviting admins and customers, uploading reports, viewing analytics, and impersonating customers for support.
+### System Overview
 
 ```mermaid
-journey
-    title Super Admin Journey
-    section Authentication
-      Login with credentials: 5: Super Admin
-      Complete MFA challenge: 5: Super Admin
-    section Dashboard
-      View dashboard overview: 5: Super Admin
-    section Space Management
-      Create customer space: 5: Super Admin
-      Invite admin (versent.com.au only): 5: Super Admin
-      Invite customer to space: 5: Super Admin
-    section Report Management
-      Upload reports to space: 5: Super Admin
-      View report (embedded iframe): 5: Super Admin
-      View report (full-tab mode): 5: Super Admin
-    section Monitoring
-      View analytics dashboard: 5: Super Admin
-      View audit log: 5: Super Admin
-    section Impersonation
-      Impersonate customer (read-only): 3: Super Admin
-      Browse as customer: 3: Super Admin
-      Exit impersonation: 5: Super Admin
+flowchart TB
+    subgraph Users["Users"]
+        SA["Super Admin\n(@versent.com.au)"]
+        AD["Admin\n(@versent.com.au)"]
+        CU["Customer\n(Invited Only)"]
+    end
+
+    subgraph Edge["AWS Edge Layer"]
+        WAF["AWS WAF\n---\nCore Rule Set\nKnown Bad Inputs\nBot Control\nRate Limiting\nGeo-restriction"]
+        CF["CloudFront Distribution\n---\n/ -> SPA\n/api/* -> API Gateway\n/reports/* -> Report S3\nSigned Cookies (3hr TTL)"]
+    end
+
+    subgraph Auth["Authentication"]
+        Cognito["Cognito User Pool\n---\nMFA Required (TOTP)\nPassword: 12+ chars\nInvitation-only signup"]
+    end
+
+    subgraph API["API Layer"]
+        APIGW["API Gateway (REST)\n---\nCognito Authorizer\nCORS configured"]
+    end
+
+    subgraph Compute["Compute - Java 21 + Spring Boot 3"]
+        AuthFn["Auth Function"]
+        AdminFn["Admin Function"]
+        CustFn["Customer Function"]
+        FeedFn["Feedback Function"]
+        AnalyticsFn["Analytics Function"]
+        AuditFn["Audit Function"]
+        NotifFn["Notification Function"]
+    end
+
+    subgraph Storage["Data Layer"]
+        DDB["DynamoDB\n9 Tables\nKMS Encrypted"]
+        S3B["S3 Buckets\nPer-customer isolation\nKMS Encrypted"]
+    end
+
+    subgraph Events["Event-Driven"]
+        EB["EventBridge"]
+        SES["Amazon SES"]
+    end
+
+    SA & AD & CU --> WAF --> CF
+    CF --> APIGW
+    CF -->|"OAC"| S3B
+    APIGW <-->|"JWT"| Cognito
+    APIGW --> AuthFn & AdminFn & CustFn & FeedFn & AnalyticsFn & AuditFn
+    AuthFn & AdminFn & CustFn & FeedFn & AnalyticsFn & AuditFn --> DDB
+    AdminFn & CustFn --> S3B
+    FeedFn & AdminFn --> EB
+    EB --> NotifFn --> SES
+
+    classDef edge fill:#ff9900,stroke:#232f3e,color:#fff
+    classDef compute fill:#ed7100,stroke:#232f3e,color:#fff
+    classDef storage fill:#3b48cc,stroke:#232f3e,color:#fff
+    classDef event fill:#e7157b,stroke:#232f3e,color:#fff
+    classDef auth fill:#dd344c,stroke:#232f3e,color:#fff
+
+    class WAF,CF edge
+    class AuthFn,AdminFn,CustFn,FeedFn,AnalyticsFn,AuditFn,NotifFn compute
+    class DDB,S3B storage
+    class EB,SES event
+    class Cognito,APIGW auth
 ```
 
-**E2E Test Scenarios:**
+### CDK Stacks
 
-| # | Scenario | Steps | Expected Result |
-|---|----------|-------|-----------------|
-| SA-1 | Login with MFA | Enter credentials -> Enter TOTP code | Redirected to admin dashboard |
-| SA-2 | Create customer space | Spaces -> Create Space -> Enter name (e.g. "acme-corp") -> Submit | Space appears in list, S3 bucket provisioned |
-| SA-3 | Invite admin | Users -> Invite Admin -> Enter @versent.com.au email -> Submit | Invitation email sent, user appears as PENDING |
-| SA-4 | Invite customer to space | Spaces -> Select space -> Invite Customer -> Enter email -> Submit | Invitation email sent, user linked to space |
-| SA-5 | Upload report | Spaces -> Select space -> Reports -> Upload -> Select HTML file | Report appears in list with metadata |
-| SA-6 | View report | Reports -> Click report -> View in iframe | Report renders in sandboxed iframe |
-| SA-7 | View analytics | Analytics -> Select space | Charts show report views, active users |
-| SA-8 | View audit log | Audit Log -> Filter by date/action | Paginated log entries displayed |
-| SA-9 | Impersonate customer | Users -> Select customer -> Impersonate | Read-only banner shown, browsing as customer |
-| SA-10 | Exit impersonation | Click "Exit Impersonation" | Returned to admin view |
-| SA-11 | Disable/enable user | Users -> Select user -> Disable -> Confirm | User status toggled, cannot/can login |
-| SA-12 | Reset user MFA | Users -> Select user -> Reset MFA | User prompted to re-enroll MFA on next login |
-| SA-13 | Delete user | Users -> Select user -> Delete -> Confirm | User removed from system |
-
-#### Journey 2: Admin
-
-Admins manage their assigned customer spaces, upload reports, invite customers, handle feedback, and review scoped analytics.
+The infrastructure is organized into 9 CDK stacks with explicit dependencies:
 
 ```mermaid
-journey
-    title Admin Journey
-    section Authentication
-      Login with credentials: 5: Admin
-      Complete MFA challenge: 5: Admin
-    section Space Management
-      View assigned spaces: 5: Admin
-      Upload report to space: 5: Admin
-      Invite customer (domain mismatch warning): 4: Admin
-    section User Management
-      Disable user: 4: Admin
-      Enable user: 4: Admin
-      Reset user MFA: 4: Admin
-    section Feedback
-      View feedback threads: 5: Admin
-      Reply to customer feedback: 5: Admin
-    section Monitoring
-      View space analytics: 5: Admin
-      View audit log (assigned spaces): 5: Admin
+flowchart LR
+    subgraph Sydney["ap-southeast-2"]
+        Auth["AuthStack\nCognito + Triggers"]
+        Storage["StorageStack\n9 DDB Tables + S3 + KMS"]
+        Events["EventsStack\nEventBridge Bus"]
+        Email["EmailStack\nSES + Bounce Handler"]
+        Api["ApiStack\n7 Lambdas + API GW"]
+        Frontend["FrontendStack\nCloudFront + S3 Hosting"]
+        Monitoring["MonitoringStack\nDashboard + Alarms"]
+    end
+
+    subgraph Virginia["us-east-1"]
+        Security["SecurityStack\nWAF WebACL"]
+    end
+
+    OIDC["GitHubOIDC Stack\nOIDC Provider + Deploy Role"]
+
+    Auth --> Api
+    Storage --> Api
+    Events --> Api
+    Security --> Frontend
+    Api --> Frontend
+    Api --> Monitoring
+
+    classDef sydney fill:#ff9900,stroke:#232f3e,color:#fff
+    classDef virginia fill:#dd344c,stroke:#232f3e,color:#fff
+    classDef oidc fill:#2ea44f,stroke:#232f3e,color:#fff
+
+    class Auth,Storage,Events,Email,Api,Frontend,Monitoring sydney
+    class Security virginia
+    class OIDC oidc
 ```
 
-**E2E Test Scenarios:**
-
-| # | Scenario | Steps | Expected Result |
-|---|----------|-------|-----------------|
-| AD-1 | Login with MFA | Enter credentials -> Enter TOTP code | Redirected to admin dashboard |
-| AD-2 | View assigned spaces only | Navigate to Spaces | Only assigned spaces visible (not all) |
-| AD-3 | Upload report to space | Select space -> Reports -> Upload HTML | Report uploaded, appears in list |
-| AD-4 | Invite customer | Select space -> Invite Customer -> Enter email | Invitation sent; domain mismatch warning if email doesn't match space name |
-| AD-5 | View feedback inbox | Feedback tab -> View threads | Threaded conversations listed with status |
-| AD-6 | Reply to feedback | Select thread -> Type reply -> Submit | Reply saved, customer notified via email |
-| AD-7 | Disable user | Users -> Select customer -> Disable | User cannot log in |
-| AD-8 | Reset user MFA | Users -> Select customer -> Reset MFA | User must re-enroll TOTP on next login |
-| AD-9 | Cannot access unassigned space | Attempt to navigate to unassigned space URL | 403 Forbidden or redirect |
-| AD-10 | Cannot invite admins | No "Invite Admin" button visible | Button hidden for non-super-admin role |
-
-#### Journey 3: Customer
-
-Customers are invited by an Admin or Super Admin, complete registration with MFA setup, then browse reports and submit feedback.
+### Authentication Flow
 
 ```mermaid
-journey
-    title Customer Journey
-    section Onboarding
-      Receive invitation email: 5: Customer
-      Accept invitation link: 5: Customer
-      Register (name, phone, company, password): 4: Customer
-      Setup MFA (TOTP): 4: Customer
-    section Authentication
-      First login with new credentials: 5: Customer
-    section Report Viewing
-      Browse assigned spaces: 5: Customer
-      Open report (full-tab default): 5: Customer
-      Navigate report tabs: 5: Customer
-    section Feedback
-      Submit feedback with attachment: 4: Customer
-      Receive reply notification: 5: Customer
-      View resolved feedback: 5: Customer
+flowchart TD
+    Login["Login\n(email + password)"] --> SRP["Cognito SRP Auth"]
+    SRP -->|NEW_PASSWORD_REQUIRED| FirstLogin["Set New Password\n(12+ chars)"]
+    FirstLogin --> MFASetup["MFA Setup\nScan QR Code"]
+    MFASetup --> Verify1["Enter TOTP Code"]
+    Verify1 --> Dashboard
+
+    SRP -->|SOFTWARE_TOKEN_MFA| MFAVerify["Enter TOTP Code"]
+    MFAVerify --> Dashboard["Dashboard\n(Admin or Customer)"]
+
+    Dashboard --> APICall["API Call\n(ID token in Authorization header)"]
+    APICall -->|200| Success["Response"]
+    APICall -->|401| Refresh["Cognito SDK\nrefreshSession()"]
+    Refresh -->|New ID token| Retry["Retry API Call"]
+    Refresh -->|Failed| Logout["Clear tokens\nRedirect to login"]
+
+    style Login fill:#ff9900,stroke:#232f3e,color:#fff
+    style Dashboard fill:#2ea44f,stroke:#232f3e,color:#fff
+    style Logout fill:#dd344c,stroke:#232f3e,color:#fff
 ```
 
-**E2E Test Scenarios:**
+Key details:
+- **ID token** (not access token) is used for API calls — it contains `custom:role` and `custom:customer_space` claims
+- **Token refresh** uses Cognito SDK client-side (`refreshSession()`), not a backend endpoint
+- **JwtAuthenticationFilter** in each Lambda validates the JWT signature, extracts claims, and populates `SecurityContext` via ThreadLocal
+- **SecurityContext** is always cleared in a `finally` block to prevent ThreadLocal leaks
 
-| # | Scenario | Steps | Expected Result |
-|---|----------|-------|-----------------|
-| CU-1 | Accept invitation | Click invitation link in email | Registration form displayed |
-| CU-2 | Register | Fill name, phone, company, password -> Submit | Account created, redirected to MFA setup |
-| CU-3 | Setup MFA | Scan QR code with authenticator -> Enter 6-digit code -> Verify | MFA enrolled, redirected to dashboard |
-| CU-4 | First login | Enter credentials -> Enter TOTP code | Redirected to customer dashboard |
-| CU-5 | Browse spaces | Navigate to Spaces | Only assigned spaces visible |
-| CU-6 | View report | Select space -> Click report | Report rendered in sandboxed iframe via signed cookies |
-| CU-7 | Submit feedback | Open report -> Feedback tab -> Type message -> Attach file -> Submit | Thread created, admin notified |
-| CU-8 | View feedback reply | Notifications -> Click notification | Thread opens showing admin reply |
-| CU-9 | Cannot access other spaces | Attempt to navigate to another space URL | 403 Forbidden or redirect |
-| CU-10 | Cannot upload reports | No upload UI visible | Upload controls hidden for customer role |
-| CU-11 | Session expiry | Wait for token expiry while viewing report | Overlay shown, prompted to re-authenticate |
-| CU-12 | Expired invitation | Click invitation link after 24 hours | Error message: invitation expired |
-
-#### Journey 4: Report Viewing (Sequence)
+### Report Viewing Flow
 
 ```mermaid
 sequenceDiagram
@@ -199,20 +191,18 @@ sequenceDiagram
     participant S3
 
     Customer->>Frontend: Click report
-    Frontend->>API Gateway: GET /api/customer/spaces/{spaceId}/reports/{reportId}
+    Frontend->>API Gateway: GET /api/customer/spaces/{id}/reports/{id}
     API Gateway->>Lambda: Validate JWT + space access
     Lambda->>Lambda: Generate signed cookies (3hr TTL)
-    Lambda->>Frontend: Return metadata + CloudFront /reports/* URL + cookies
+    Lambda->>Frontend: Metadata + signed cookies
     Frontend->>CloudFront: Load report HTML via /reports/* (with signed cookies)
-    CloudFront->>S3: Strip /reports prefix, fetch from report bucket (OAC)
+    CloudFront->>S3: Fetch from customer bucket (OAC)
     S3-->>CloudFront: Report HTML
     CloudFront-->>Frontend: Report HTML
     Frontend->>Frontend: Render in sandboxed iframe
-
-    Note over Frontend: Session expiry triggers overlay and re-auth required
 ```
 
-#### Journey 5: Feedback and Notification (Sequence)
+### Feedback & Notification Flow
 
 ```mermaid
 sequenceDiagram
@@ -221,244 +211,113 @@ sequenceDiagram
     participant API
     participant DynamoDB
     participant EventBridge
-    participant NotificationLambda as Notification Lambda
+    participant Lambda as Notification Lambda
     participant SES
 
-    Customer->>API: POST feedback (message + optional attachment)
+    Customer->>API: POST feedback (message + attachment)
     API->>DynamoDB: Store thread + message
     API->>EventBridge: Publish feedback.new
-    EventBridge->>NotificationLambda: Trigger
-    NotificationLambda->>DynamoDB: Create admin notifications
-    NotificationLambda->>SES: Send email to space admins
+    EventBridge->>Lambda: Trigger
+    Lambda->>DynamoDB: Create admin notification
+    Lambda->>SES: Send email to space admins
     SES-->>Admin: Email notification
 
-    Note over Admin: Admin sees notification in portal
-
-    Admin->>API: POST reply to feedback thread
-    API->>DynamoDB: Store reply message
+    Admin->>API: POST reply to thread
+    API->>DynamoDB: Store reply
     API->>EventBridge: Publish feedback.reply
-    EventBridge->>NotificationLambda: Trigger
-    NotificationLambda->>DynamoDB: Create customer notification
-    NotificationLambda->>SES: Send email to customer
-    SES-->>Customer: Email notification
+    EventBridge->>Lambda: Trigger
+    Lambda->>SES: Send email to customer
 ```
 
-#### Journey 6: Invitation (Sequence)
+## CI/CD Pipeline
+
+All CI/CD runs through GitHub Actions. No local deployment scripts are needed — `scripts/deploy.sh` is a thin wrapper that triggers the GitHub Actions workflow.
+
+### Pipeline Architecture
 
 ```mermaid
-sequenceDiagram
-    actor Admin
-    participant API
-    participant Lambda
-    participant DynamoDB
-    participant SES
-    participant Cognito
-    participant EventBridge
-    participant NotificationLambda as Notification Lambda
-    actor Customer
+flowchart TD
+    subgraph CI["CI Pipeline (ci.yml)\nRuns on: PR + push to main"]
+        FE_CI["Frontend\nLint + Test + Build"]
+        BE_CI["Backend\nMaven Build + Test"]
+        INFRA_CI["Infrastructure\nCDK Compile + Jest"]
+    end
 
-    Admin->>API: POST invite (email, spaceId)
-    API->>Lambda: Validate (domain check, role check)
-    Lambda->>DynamoDB: Store invitation (24hr TTL)
-    Lambda->>SES: Send invitation email
-    SES-->>Customer: Invitation email with link
+    subgraph CD["CD Pipeline (deploy.yml)\nRuns on: manual trigger"]
+        BE_BUILD["Build Backend\nMaven package"] --> CDK["Deploy Infrastructure\nCDK synth + deploy"]
+        CDK -->|"Outputs: Cognito IDs\nCloudFront domain"| FE_BUILD["Build Frontend\nInject .env.production\nnpm build"]
+        FE_BUILD --> DEPLOY["Deploy Frontend\nS3 sync + CF invalidation"]
+    end
 
-    Customer->>Customer: Click invitation link
-    Customer->>API: Load registration form
-    Customer->>API: POST register (name, phone, company, password)
-    API->>Cognito: Create user + set attributes
-    Cognito-->>Customer: User created
+    subgraph Tests["Post-Deploy Verification"]
+        API_TEST["API Smoke Tests\n(api-tests.yml)"]
+        E2E_TEST["E2E Tests\n(e2e-tests.yml)\nPlaywright"]
+    end
 
-    Customer->>Cognito: Setup MFA (TOTP)
-    Cognito-->>Customer: MFA configured
+    DEPLOY --> API_TEST & E2E_TEST
 
-    Customer->>API: First login
-    API->>EventBridge: Publish user.first_login
-    EventBridge->>NotificationLambda: Trigger
-    NotificationLambda->>DynamoDB: Create notification for inviting admin
-    NotificationLambda->>SES: Send email to inviting admin
-    SES-->>Admin: Customer accepted invitation
+    classDef ci fill:#2ea44f,stroke:#232f3e,color:#fff
+    classDef cd fill:#ff9900,stroke:#232f3e,color:#fff
+    classDef test fill:#3b48cc,stroke:#232f3e,color:#fff
+
+    class FE_CI,BE_CI,INFRA_CI ci
+    class BE_BUILD,CDK,FE_BUILD,DEPLOY cd
+    class API_TEST,E2E_TEST test
 ```
 
-## Architecture
+### Workflows
 
-### End-to-End System Architecture
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `ci.yml` | PR + push to `main` | Lint, test, build (frontend, backend, infra) |
+| `deploy.yml` | Manual (`workflow_dispatch`) | Full deploy: backend -> CDK -> frontend -> S3 -> tests |
+| `api-tests.yml` | Manual or post-deploy | API smoke tests (no browser needed) |
+| `e2e-tests.yml` | Manual or post-deploy | Playwright E2E tests with browser |
 
-The following diagram shows the complete serverless architecture across all AWS regions and layers, including every service, data flow, and security boundary.
+### CD Pipeline Detail
 
-```mermaid
-flowchart TB
-    subgraph Users["Users"]
-        SA["Super Admin\n(@versent.com.au)"]
-        AD["Admin\n(@versent.com.au)"]
-        CU["Customer\n(Invited Only)"]
-    end
+The deploy pipeline solves the **chicken-and-egg problem**: the frontend needs Cognito and CloudFront values that only exist after CDK deploys. The pipeline:
 
-    subgraph Edge["AWS Edge Layer (us-east-1 + ap-southeast-2)"]
-        WAF["AWS WAF\n---\n* Core Rule Set (CRS)\n* Known Bad Inputs\n* Bot Control (COUNT)\n* Rate Limit: 1000/5min\n* Geo-block: AU only\n* IP Reputation List"]
-        CF["CloudFront\nConsolidated Distribution\n---\n* / -> SPA (Portal)\n* /api/* -> API Gateway\n* /reports/* -> Report S3\n* Signed Cookies (3hr TTL)\n* HSTS, CSP, OAC\n* HTTP/2 + HTTP/3"]
-    end
+1. **Build Backend** — Maven packages Lambda JARs
+2. **Deploy Infrastructure** — CDK synth (validates) + deploy (creates/updates stacks). Extracts outputs: Cognito Pool ID, Client ID, CloudFront domain
+3. **Build Frontend** — Generates `.env.production` with real values from step 2, then builds
+4. **Deploy Frontend** — Syncs to S3, invalidates CloudFront
+5. **Post-Deploy Tests** — API smoke tests + E2E tests run in parallel
 
-    subgraph Hosting["Frontend Hosting (ap-southeast-2)"]
-        S3_SPA["S3 - SPA Bucket\n---\nReact 18 + TypeScript\nVite + Tailwind CSS\nshadcn/ui Components"]
-    end
+The `skip_infra` option skips CDK deploy and looks up existing values from CloudFormation stacks (for frontend-only deploys).
 
-    subgraph Auth["Authentication Layer"]
-        Cognito["Cognito User Pool\n---\n* MFA Required (TOTP)\n* Password: 12+ chars\n* Invitation-only signup\n* 15min access / 1hr refresh\n* Custom attrs: role, space"]
-        PreSignup["Pre-Signup Trigger\n(Lambda)\n---\n* Validate invitation token\n* Check email domain\n* SnapStart enabled"]
-    end
-
-    subgraph API["API Layer"]
-        APIGW["API Gateway (REST)\n---\n* Cognito Authorizer\n* CORS configured\n* Request validation\n* Regional WAF"]
-    end
-
-    subgraph Compute["Compute Layer - Java 21 + Spring Boot 3 (Lambda)"]
-        AuthFn["Auth Function\n512MB / 30s\n---\n* POST /auth/login\n* POST /auth/mfa-verify\n* POST /auth/forgot-password\n* POST /auth/change-password\n* POST /auth/first-login"]
-        AdminFn["Admin Function\n1536MB / 30s\n---\n* CRUD /admin/spaces\n* Upload /reports\n* POST /invite\n* POST /invite-admin\n* User mgmt (disable/enable/MFA)\n* POST /impersonate"]
-        CustFn["Customer Function\n1024MB / 30s\n---\n* GET /customer/spaces\n* GET /reports (+ signed cookies)\n* PUT /preferences"]
-        FeedFn["Feedback Function\n1024MB / 30s\n---\n* CRUD /feedback threads\n* POST /reply\n* PUT /status\n* POST /attachments\n* GET /admin/feedback/inbox"]
-        AnalyticsFn["Analytics Function\n1024MB / 30s\n---\n* GET /admin/analytics/spaces\n* GET /admin/analytics/users\n* POST /admin/analytics/export"]
-        AuditFn["Audit Function\n1024MB / 30s\n---\n* GET /admin/audit-log\n* Paginated queries"]
-        NotifFn["Notification Function\n1024MB / 30s\n---\n* GET /notifications\n* PUT /read, /read-all\n* GET /count\n* EventBridge target (5 events)"]
-    end
-
-    subgraph Storage["Data Layer (ap-southeast-2)"]
-        subgraph DDB["DynamoDB (PAY_PER_REQUEST + KMS)"]
-            T1["Users Table\nPK: USER#id | SK: PROFILE\nGSI: email-index"]
-            T2["Spaces Table\nPK: SPACE#id | SK: META\nGSI: spaceName-index"]
-            T3["Reports Table\nPK: SPACE#id | SK: REPORT#id"]
-            T4["Invitations Table\nPK: INVITE#token | SK: META\n24hr TTL"]
-            T5["AuditLog Table\nPK: AUDIT#date | SK: EVENT#ts\n2-year retention"]
-            T6["Analytics Table\nPK: ANALYTICS#space | SK: EVENT#ts\nGSI: report-analytics-index"]
-            T7["Notifications Table\nPK: NOTIFICATION#user | SK: ts#id\nGSI: unread-index"]
-            T8["FeedbackThreads Table\nPK: THREAD#id | SK: META\n3 GSIs: report, space, status"]
-            T9["FeedbackMessages Table\nPK: THREAD#id | SK: MESSAGE#id"]
-        end
-        subgraph S3["S3 Buckets (KMS Encrypted)"]
-            S3_Cust["Customer Report Buckets\n---\n* Per-customer isolation\n* Versioning enabled\n* Glacier archive (2yr)\n* Server access logging\n* Block public access"]
-            S3_Feedback["Feedback Attachments\nBucket"]
-            S3_Audit["Audit Log Archive\nBucket"]
-        end
-        KMS["KMS\nCustomer-Managed Key\nAnnual Rotation"]
-    end
-
-    subgraph Events["Event-Driven Layer"]
-        EB["EventBridge\nCustom Event Bus\n---\n* 90-day archive\n* 5 event rules\n* 3 retries / 1hr max"]
-        subgraph EventTypes["Event Types"]
-            E1["feedback.new"]
-            E2["feedback.reply"]
-            E3["user.first_login"]
-            E4["feedback.resolved"]
-            E5["invitation.accepted"]
-        end
-        SES["Amazon SES\n---\n* Domain identity\n* Bounce/complaint SNS\n* Bounce handler Lambda"]
-    end
-
-    subgraph Monitoring["Observability Layer"]
-        CW["CloudWatch\n---\n* Structured JSON logs\n* Custom dashboard\n* API latency: p50/p95/p99\n* Lambda duration & errors\n* DDB consumed capacity"]
-        Alarms["CloudWatch Alarms\n---\n* Lambda error rate\n* API 4xx/5xx rates\n* DDB throttling\n* SNS alert topic"]
-        XRay["X-Ray\nDistributed Tracing"]
-    end
-
-    %% User flows
-    SA & AD & CU --> WAF
-    WAF --> CF
-    CF --> S3_SPA
-    CF -->|"OAC"| S3_Cust
-    CF --> APIGW
-
-    %% Auth flows
-    APIGW <-->|"JWT validation"| Cognito
-    Cognito --> PreSignup
-
-    %% API to Lambda routing
-    APIGW --> AuthFn
-    APIGW --> AdminFn
-    APIGW --> CustFn
-    APIGW --> FeedFn
-    APIGW --> AnalyticsFn
-    APIGW --> AuditFn
-
-    %% Lambda to data
-    AuthFn --> T1 & T4 & T5
-    AuthFn <--> Cognito
-    AdminFn --> T1 & T2 & T3 & T4 & T5
-    AdminFn --> S3_Cust
-    AdminFn --> EB
-    CustFn --> T1 & T2 & T3
-    CustFn -->|"Generate signed cookies"| CF
-    FeedFn --> T8 & T9 & T5
-    FeedFn --> S3_Feedback
-    FeedFn --> EB
-    AnalyticsFn --> T6
-    AuditFn --> T5
-    NotifFn --> T7
-    NotifFn --> SES
-
-    %% Event flows
-    EB --> E1 & E2 & E3 & E4 & E5
-    E1 & E2 & E3 & E4 & E5 --> NotifFn
-
-    %% KMS encryption
-    KMS -.->|"Encrypts"| S3_Cust & S3_Feedback & S3_Audit & DDB
-
-    %% Monitoring
-    AuthFn & AdminFn & CustFn & FeedFn & AnalyticsFn & AuditFn & NotifFn --> CW
-    AuthFn & AdminFn & CustFn & FeedFn --> XRay
-    CW --> Alarms
-
-    %% Styles
-    classDef edge fill:#ff9900,stroke:#232f3e,color:#fff
-    classDef compute fill:#ed7100,stroke:#232f3e,color:#fff
-    classDef storage fill:#3b48cc,stroke:#232f3e,color:#fff
-    classDef event fill:#e7157b,stroke:#232f3e,color:#fff
-    classDef monitor fill:#2ea44f,stroke:#232f3e,color:#fff
-    classDef auth fill:#dd344c,stroke:#232f3e,color:#fff
-    classDef kms fill:#8c4fff,stroke:#232f3e,color:#fff
-
-    class WAF,CF edge
-    class AuthFn,AdminFn,CustFn,FeedFn,AnalyticsFn,AuditFn,NotifFn,PreSignup compute
-    class T1,T2,T3,T4,T5,T6,T7,T8,T9,S3_Cust,S3_Feedback,S3_Audit,S3_SPA storage
-    class EB,SES,E1,E2,E3,E4,E5 event
-    class CW,Alarms,XRay monitor
-    class Cognito,APIGW auth
-    class KMS kms
-```
-
-### CDK Stack Dependency Graph
-
-This diagram shows the 8 CDK stacks and their deployment dependencies.
+### First-Time CI/CD Setup
 
 ```mermaid
 flowchart LR
-    subgraph Region_Sydney["ap-southeast-2"]
-        AuthStack["AuthStack\n---\n* Cognito User Pool\n* Pre-Signup Trigger\n* App Clients"]
-        StorageStack["StorageStack\n---\n* 9 DynamoDB Tables\n* 3 S3 Buckets\n* KMS Key"]
-        EventsStack["EventsStack\n---\n* EventBridge Bus\n* 90-day Archive"]
-        EmailStack["EmailStack\n---\n* SES Domain Identity\n* Bounce SNS Topic\n* Bounce Handler Lambda"]
-        ApiStack["ApiStack\n---\n* API Gateway\n* 7 Lambda Functions\n* EventBridge Rules\n* Regional WAF\n* IAM Policies"]
-        FrontendStack["FrontendStack\n---\n* 1 CloudFront Distribution\n  (/, /api/*, /reports/*)\n* S3 Hosting Buckets\n* Security Headers\n* Signed Cookie Config"]
-        MonitoringStack["MonitoringStack\n---\n* CloudWatch Dashboard\n* SNS Alarm Topic\n* Metric Alarms"]
-    end
-
-    subgraph Region_Virginia["us-east-1"]
-        SecurityStack["SecurityStack\n---\n* WAF WebACL (CloudFront)\n* Managed Rule Groups\n* Rate Limiting\n* Geo-restriction"]
-    end
-
-    AuthStack --> ApiStack
-    StorageStack --> ApiStack
-    EventsStack --> ApiStack
-    EmailStack --> ApiStack
-    SecurityStack --> FrontendStack
-    ApiStack --> FrontendStack
-    ApiStack --> MonitoringStack
-
-    classDef sydney fill:#ff9900,stroke:#232f3e,color:#fff
-    classDef virginia fill:#dd344c,stroke:#232f3e,color:#fff
-
-    class AuthStack,StorageStack,EventsStack,EmailStack,ApiStack,FrontendStack,MonitoringStack sydney
-    class SecurityStack virginia
+    A["1. CDK bootstrap\n(both regions)"] --> B["2. Deploy OIDC stack\nbootstrap-github-oidc.sh"]
+    B --> C["3. Configure GitHub\nEnvironment variables"]
+    C --> D["4. Trigger deploy\ngh workflow run"]
 ```
+
+**One-time steps:**
+
+```bash
+# 1. Bootstrap CDK (required once per account per region)
+cd infrastructure
+cdk bootstrap aws://ACCOUNT_ID/ap-southeast-2
+cdk bootstrap aws://ACCOUNT_ID/us-east-1
+
+# 2. Deploy GitHub OIDC provider + deploy role
+./scripts/bootstrap-github-oidc.sh dev
+
+# 3. Configure GitHub (Settings -> Environments -> create "dev")
+#    Variable: AWS_DEPLOY_ROLE_ARN = <role ARN from step 2>
+#    Secret:   E2E_ADMIN_EMAIL = <test admin email>
+#    Secret:   E2E_ADMIN_PASSWORD = <test admin password>
+
+# 4. Trigger deployment
+gh workflow run deploy.yml -f environment=dev
+# Or use the convenience wrapper:
+./scripts/deploy.sh dev --watch
+```
+
+The OIDC stack creates an IAM role scoped to your GitHub repo only. GitHub Actions gets temporary credentials via OIDC federation — no long-lived AWS keys are stored anywhere.
 
 ## Tech Stack
 
@@ -466,267 +325,100 @@ flowchart LR
 |-------|-----------|
 | Frontend | React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui |
 | Backend | Java 21, Spring Boot 3, Spring Cloud Function, Lambda SnapStart |
-| Infrastructure | CDK v2 (TypeScript), 8 stacks |
+| Infrastructure | CDK v2 (TypeScript), 9 stacks |
 | Auth | Cognito User Pool (MFA enforced, TOTP) |
 | Database | DynamoDB (9 tables, KMS encrypted) |
 | Storage | S3 (per-customer bucket isolation, KMS) |
 | CDN | CloudFront (consolidated distribution) + WAF |
 | Email | Amazon SES |
 | Events | Amazon EventBridge |
-| CI/CD | GitHub Actions (OIDC auth) |
+| CI/CD | GitHub Actions (OIDC auth, no stored keys) |
 
 ## Project Structure
 
 ```
 ReportsPortal/
-├── .github/
-│   └── workflows/
-│       ├── ci.yml              # CI: lint, test, build on PR/push to main
-│       └── deploy.yml          # CD: manual deploy to dev/staging/prod
-├── infrastructure/             # CDK v2 TypeScript
-│   ├── bin/                    # CDK app entry point + environment configs
+├── .github/workflows/
+│   ├── ci.yml                    # CI: lint, test, build on PR/push
+│   ├── deploy.yml                # CD: full deploy pipeline
+│   ├── api-tests.yml             # API smoke tests (reusable)
+│   └── e2e-tests.yml             # Playwright E2E tests (reusable)
+├── scripts/
+│   ├── deploy.sh                 # Wrapper for gh workflow run
+│   └── bootstrap-github-oidc.sh  # One-time OIDC setup
+├── infrastructure/               # CDK v2 TypeScript
+│   ├── bin/                      # CDK app entry point
 │   ├── lib/
-│   │   ├── stacks/             # Auth, Storage, API, Events, Frontend, Security, Email, Monitoring
-│   │   └── constructs/         # Reusable constructs (WAF, customer bucket, Lambda)
-│   └── test/                   # CDK assertion tests
-├── backend/                    # Java 21 + Spring Boot 3
-│   ├── shared/                 # Shared library (models, security, services, DTOs)
-│   ├── auth-function/          # Authentication Lambda
-│   ├── admin-function/         # Admin operations Lambda
-│   ├── customer-function/      # Customer operations Lambda
-│   ├── feedback-function/      # Feedback system Lambda
-│   ├── analytics-function/     # Analytics Lambda
-│   ├── audit-function/         # Audit log Lambda
-│   ├── notification-function/  # Notification delivery Lambda
-│   └── cognito-triggers/       # Cognito pre-signup trigger
-├── frontend/                   # React SPA (admin + customer portal)
-│   ├── src/
-│   │   ├── components/         # UI, layout, auth, admin, customer, feedback components
-│   │   ├── pages/              # Route pages (admin, customer, auth)
-│   │   ├── hooks/              # Custom hooks (useAuth, useNotifications)
-│   │   ├── contexts/           # Auth, notification contexts
-│   │   ├── services/           # API service layer (auth, spaces, reports, users)
-│   │   └── types/              # TypeScript interfaces
-│   └── public/
-├── e2e/                        # Playwright E2E tests
-├── docker-compose.yml          # Local dev (DynamoDB Local)
-└── CLAUDE.md                   # Full project specification
+│   │   ├── stacks/               # 9 stacks
+│   │   └── constructs/           # Reusable constructs
+│   └── test/                     # CDK assertion tests
+├── backend/                      # Java 21 + Spring Boot 3
+│   ├── shared/                   # Shared library (security, models)
+│   ├── auth-function/            # Authentication Lambda
+│   ├── admin-function/           # Admin operations Lambda
+│   ├── customer-function/        # Customer operations Lambda
+│   ├── feedback-function/        # Feedback system Lambda
+│   ├── analytics-function/       # Analytics Lambda
+│   ├── audit-function/           # Audit log Lambda
+│   ├── notification-function/    # Notification delivery Lambda
+│   └── cognito-triggers/         # Cognito pre-signup trigger
+├── frontend/                     # React SPA
+│   └── src/
+│       ├── components/           # UI components
+│       ├── pages/                # Route pages
+│       ├── contexts/             # Auth, notification contexts
+│       ├── services/             # API layer
+│       └── types/                # TypeScript interfaces
+├── e2e/                          # Playwright E2E tests
+│   ├── tests/                    # Test specs
+│   └── scripts/                  # API smoke test script
+└── docker-compose.yml            # Local dev (DynamoDB Local)
 ```
 
-## Prerequisites
+## Security
 
-- **Java 21** (with JAVA_HOME set)
-- **Maven 3.9+** (or use included wrapper `./mvnw`)
-- **Node.js 20+** and **npm 10+**
-- **AWS CDK CLI** (`npm install -g aws-cdk`)
-- **AWS SAM CLI** (for local Lambda testing)
-- **Docker** (for DynamoDB Local)
-- **AWS CLI v2** (configured with appropriate credentials)
+### Authentication Pipeline
 
-## Local Development
-
-### 1. Start Local Services
-
-```bash
-docker compose up -d
+```mermaid
+flowchart LR
+    Browser -->|"ID token\n(Bearer header)"| CloudFront
+    CloudFront -->|"Origin verify\nheader"| APIGW["API Gateway"]
+    APIGW -->|"Cognito\nauthorizer"| Lambda
+    Lambda -->|"JwtAuthenticationFilter\npopulates SecurityContext"| Handler["Request Handler\n(RoleChecker enforces\npermissions)"]
 ```
 
-This starts:
-- **DynamoDB Local** on port 8000
-- **DynamoDB Admin UI** on port 8001 (http://localhost:8001)
-- Automatically creates all required DynamoDB tables
+Every API request passes through:
+1. **CloudFront WAF** — Rate limiting, geo-restriction, managed rules
+2. **API Gateway Cognito Authorizer** — Validates JWT signature and expiry
+3. **JwtAuthenticationFilter** (Spring Boot) — Extracts claims, populates ThreadLocal `SecurityContext`
+4. **RoleChecker** — Enforces role-based permissions per endpoint
 
-### 2. Build Backend
+### MFA Enforcement
 
-```bash
-cd backend
-./mvnw clean package -DskipTests
+Every user must enrol TOTP-based MFA on first login. No exceptions, no SMS fallback.
+
+```mermaid
+flowchart LR
+    A["Temp Password\n(email)"] --> B["Set New Password\n(12+ chars)"]
+    B --> C["Scan QR Code\n(authenticator app)"]
+    C --> D["Verify TOTP\n(6-digit code)"]
+    D --> E["Dashboard\n(MFA complete)"]
 ```
 
-### 3. Run Backend Locally (SAM CLI)
+- **Mandatory TOTP** — Cognito configured with `MFA: REQUIRED`, `SOFTWARE_TOKEN_MFA` only
+- **QR code** generated client-side (`qrcode.react`), no secret sent to external services
+- **Admin MFA reset** — Forces user to re-enrol on next login
+- **No SMS fallback** — Eliminates SIM-swap attack vectors
 
-```bash
-cd backend
-sam local start-api --template template.yaml --port 3001 --warm-containers EAGER
-```
+### Security Layers
 
-### 4. Run Frontend
-
-```bash
-cd frontend
-cp .env.example .env.development
-# Edit .env.development with local config
-npm install
-npm run dev
-```
-
-Frontend runs on http://localhost:5173, proxying API calls to SAM on port 3001.
-
-### 5. Run Tests
-
-```bash
-# Backend tests
-cd backend && ./mvnw test
-
-# Frontend tests
-cd frontend && npm test
-
-# CDK tests
-cd infrastructure && npm test
-
-# E2E tests (requires deployed environment)
-cd e2e && npx playwright test
-```
-
-## Deployment
-
-### First-Time Setup
-
-```bash
-# Install CDK dependencies
-cd infrastructure
-npm install
-
-# Bootstrap CDK (both regions required)
-cdk bootstrap aws://ACCOUNT_ID/ap-southeast-2
-cdk bootstrap aws://ACCOUNT_ID/us-east-1   # Required for CloudFront WAF
-
-# Build backend JARs
-cd ../backend
-./mvnw clean package -DskipTests
-
-# Deploy all stacks
-cd ../infrastructure
-cdk deploy --all --context environment=dev
-```
-
-### Deploy to Specific Environment
-
-```bash
-# Development
-cdk deploy --all --context environment=dev
-
-# Staging
-cdk deploy --all --context environment=staging
-
-# Production (uses RemovalPolicy.RETAIN for Cognito + DynamoDB)
-cdk deploy --all --context environment=prod
-```
-
-### Frontend-Only Deploy
-
-After infrastructure is deployed, you can update just the SPA without redeploying CDK stacks:
-
-```bash
-cd frontend
-npm run build
-
-# Sync to S3 and invalidate CloudFront
-aws s3 sync dist/ s3://BUCKET_NAME/ --delete
-aws cloudfront create-invalidation --distribution-id DIST_ID --paths "/*"
-```
-
-### CI/CD Pipelines (GitHub Actions)
-
-The project includes two GitHub Actions workflows:
-
-**CI Pipeline** (`.github/workflows/ci.yml`) - Runs automatically on PRs and pushes to `main`:
-- Frontend: lint, test, build
-- Backend: Maven build and test
-- Infrastructure: CDK compile and Jest tests
-
-**CD Pipeline** (`.github/workflows/deploy.yml`) - Manual trigger via `workflow_dispatch`:
-- Select target environment: `dev`, `staging`, or `prod`
-- Option to skip infrastructure and deploy frontend only (`skip_infra`)
-- Uses OIDC for AWS authentication (no long-lived credentials)
-- Builds backend JARs and frontend bundle in parallel
-- Deploys CDK stacks, syncs SPA to S3, invalidates CloudFront
-
-To use the CD pipeline, configure these GitHub environment variables:
-- `AWS_DEPLOY_ROLE_ARN` - IAM role ARN for OIDC-based deployment
-- `SPA_BUCKET_NAME` - S3 bucket name (for frontend-only deploys)
-- `CLOUDFRONT_DISTRIBUTION_ID` - Distribution ID (for frontend-only deploys)
-
-### Post-Deployment
-
-After first deployment, the super admin account is automatically seeded:
-- **Email:** (configured in `cdk.json` as `superAdminEmail`)
-- **Temporary password:** Output in CloudFormation (check Secrets Manager or Lambda logs)
-- Must reset password and configure MFA (TOTP) on first login
-
-### Data Retention on Stack Updates
-
-| Resource | dev / staging | prod |
-|----------|--------------|------|
-| Cognito User Pool | `DESTROY` | `RETAIN` |
-| DynamoDB Tables | `DESTROY` | `RETAIN` |
-| S3 Buckets | `DESTROY` | `RETAIN` |
-
-In production, Cognito users (passwords, MFA), DynamoDB data, and S3 objects are preserved even if the stack is deleted or recreated.
-
-## Security Highlights
-
-### Multi-Factor Authentication (MFA)
-
-Every user — Super Admin, Admin, and Customer — is required to enrol TOTP-based multi-factor authentication on first login. There are no exceptions and no option to skip.
-
-```
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│  Temporary   │────>│  Set New     │────>│  Scan QR &   │────>│  Dashboard   │
-│  Password    │     │  Password    │     │  Verify TOTP │     │  (MFA Done)  │
-│  (Email)     │     │  (12+ chars) │     │  (Auth App)  │     │              │
-└──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
-```
-
-- **Mandatory TOTP** — Cognito User Pool configured with `MFA: REQUIRED` and `SOFTWARE_TOKEN_MFA` as the only factor
-- **QR code enrollment** — Generated client-side using `qrcode.react`; no secret transmitted to external services
-- **Authenticator app support** — Google Authenticator, Authy, 1Password, Microsoft Authenticator, etc.
-- **Admin MFA reset** — Admins can reset a user's MFA enrollment, forcing re-setup on next login
-- **No SMS fallback** — TOTP-only eliminates SIM-swap attack vectors
-
-### Network & WAF Protection
-
-- **Dual WAF protection** — CloudFront WAF (us-east-1) + API Gateway regional WAF (ap-southeast-2)
-- **WAF managed rules** — Core Rule Set, Known Bad Inputs, Bot Control (COUNT mode), IP Reputation, rate limiting (1000 req/5min), geo-restriction (AU only)
-- **Origin verification** — API Gateway WAF validates a shared secret header injected by CloudFront, preventing direct API access that bypasses WAF/CDN controls
-- **Single CloudFront distribution** with path-based routing (`/`, `/api/*`, `/reports/*`)
-- **Content Security Policy** on both SPA and report-serving paths
-- **CORS** explicitly configured on API Gateway and CloudFront
-
-### Data Protection
-
-- **Per-customer S3 bucket isolation** with KMS encryption (customer-managed key, annual rotation)
-- **CloudFront signed cookies** for report access (3-hour TTL)
-- **Origin Access Control (OAC)** on all S3 buckets — no public access
-- **iframe sandboxing** for HTML reports
-- **HTML sanitization** on upload (OWASP Java HTML Sanitizer)
-
-### Identity & Access
-
-- **Cognito MFA enforced** (TOTP via authenticator app, no exceptions)
-- **JWT tokens** with 15-min access / 1-hour refresh expiry
-- **Invitation-only** — No self-registration; customers invited by admins to specific spaces
-- **Role-based access** — Three roles with fine-grained permissions, admin domain restriction (@versent.com.au)
-- **Audit logging** on all operations (2-year retention)
-
-## Authentication Flow
-
-```
-Login -> Cognito SRP Auth
-  |
-  ├── NEW_PASSWORD_REQUIRED -> First Login Page -> Set new password
-  |     └── MFA_SETUP -> MFA Setup Page -> Scan QR code -> Verify TOTP
-  |
-  ├── SOFTWARE_TOKEN_MFA -> MFA Verify Page -> Enter TOTP code
-  |
-  └── Success -> Dashboard (Admin or Customer based on role)
-```
-
-Key auth features:
-- **First login:** User is prompted to change temporary password, then immediately set up TOTP MFA
-- **MFA setup:** QR code generated locally using `qrcode.react` (no external API dependencies)
-- **Token refresh:** Automatic silent refresh on 401 responses via axios interceptor
-- **Invitation-only:** No self-registration; customers are invited by admins to specific spaces
+| Layer | Protection |
+|-------|-----------|
+| **Network** | Dual WAF (CloudFront + API GW), rate limiting (1000/5min), geo-restriction (AU), origin verification header |
+| **Identity** | Cognito MFA (TOTP), invitation-only, 15min access / 1hr refresh tokens, JWT validation in each Lambda |
+| **Data** | Per-customer S3 isolation, KMS encryption (customer-managed key), CloudFront signed cookies (3hr TTL) |
+| **Application** | Role-based access (3 roles), impersonation read-only mode, HTML sanitization (OWASP), iframe sandboxing |
+| **Audit** | All operations logged, 2-year retention, exportable |
 
 ## Role Model
 
@@ -736,10 +428,113 @@ Key auth features:
 | **Admin** | Manage assigned spaces, invite customers, upload reports, user management (@versent.com.au only) |
 | **Customer** | View reports in assigned spaces, submit feedback (invited only) |
 
-## Environment Variables
+## Testing
 
-### Frontend (`frontend/.env.example`)
+### Test Coverage
 
+```mermaid
+flowchart TD
+    subgraph Unit["Unit Tests (CI - every PR)"]
+        BE["Backend (JUnit 5 + Mockito)\n40+ tests across 6 services\n- JwtAuthenticationFilter\n- SecurityContext lifecycle\n- RBAC enforcement\n- Impersonation read-only"]
+        FE["Frontend (Vitest)\n- AuthContext state\n- ID token usage\n- Token refresh flow\n- Form validation"]
+        INFRA["Infrastructure (Jest)\n50+ CDK assertions\n- WAF rules\n- DynamoDB schemas\n- S3 + KMS config"]
+    end
+
+    subgraph Integration["Post-Deploy Tests"]
+        API["API Smoke Tests\n- SPA accessibility\n- Security headers\n- Auth endpoint responses\n- Protected endpoint 401s\n- WAF validation"]
+        E2E["Playwright E2E\n100+ scenarios\n- Auth flows (MFA)\n- Role-based access\n- Impersonation\n- Report viewing\n- Feedback lifecycle"]
+    end
+
+    classDef unit fill:#2ea44f,stroke:#232f3e,color:#fff
+    classDef integ fill:#3b48cc,stroke:#232f3e,color:#fff
+
+    class BE,FE,INFRA unit
+    class API,E2E integ
+```
+
+### Regression Tests for Critical Fixes
+
+| Bug | Root Cause | Regression Test |
+|-----|-----------|-----------------|
+| Login redirect loop | Missing `JwtAuthenticationFilter` — `SecurityContext` never populated | `JwtAuthenticationFilterTest`: 7 tests covering filter lifecycle |
+| Protected endpoints always 403 | Frontend sent access token (missing `custom:role`) instead of ID token | `AuthContext.test.tsx`: asserts `setTokens()` receives ID token |
+| Token refresh 404 | Called non-existent `POST /auth/refresh` backend endpoint | `api.test.ts`: asserts refresh uses Cognito SDK `refreshSession()` |
+| ThreadLocal leak | `SecurityContext.clear()` not called on exception path | `securityContextClearedEvenOnException` test |
+
+### Running Tests
+
+```bash
+# Backend unit tests
+cd backend && ./mvnw test
+
+# Frontend unit tests
+cd frontend && npm test
+
+# CDK assertion tests
+cd infrastructure && npm test
+
+# E2E tests (requires deployed environment)
+cd e2e && BASE_URL=https://your-cloudfront-domain npx playwright test
+
+# API smoke tests (requires deployed environment)
+BASE_URL=https://your-cloudfront-domain node e2e/scripts/api-smoke-test.mjs
+```
+
+## Local Development
+
+### 1. Start Local Services
+
+```bash
+docker compose up -d    # DynamoDB Local on :8000, Admin UI on :8001
+```
+
+### 2. Build & Run Backend
+
+```bash
+cd backend
+./mvnw clean package -DskipTests
+sam local start-api --template template.yaml --port 3001 --warm-containers EAGER
+```
+
+### 3. Run Frontend
+
+```bash
+cd frontend
+cp .env.example .env.development
+npm install && npm run dev    # http://localhost:5173
+```
+
+## Environment Configuration
+
+Environments are configured in `infrastructure/cdk.json`:
+
+```json
+{
+  "dev": {
+    "account": "123456789012",
+    "region": "ap-southeast-2",
+    "domainName": "dev.reports.yourdomain.com",
+    "allowedGeoLocations": ["AU"],
+    "wafRateLimit": 1000,
+    "signedCookieTtlHours": 3,
+    "invitationExpiryHours": 24,
+    "superAdminEmail": "admin@yourdomain.com",
+    "logRetentionDays": 30
+  }
+}
+```
+
+### Data Retention
+
+| Resource | dev / staging | prod |
+|----------|--------------|------|
+| Cognito User Pool | `DESTROY` | `RETAIN` |
+| DynamoDB Tables | `DESTROY` | `RETAIN` |
+| S3 Buckets | `DESTROY` | `RETAIN` |
+
+### Environment Variables
+
+**Frontend** (`frontend/.env.example`):
 ```
 VITE_API_BASE_URL=http://localhost:3001
 VITE_COGNITO_USER_POOL_ID=ap-southeast-2_XXXXXXXXX
@@ -748,37 +543,94 @@ VITE_COGNITO_REGION=ap-southeast-2
 VITE_CLOUDFRONT_DOMAIN=https://portal.yourdomain.com
 ```
 
-### Backend (`backend/.env.example`)
-
+**Backend** (`backend/.env.example`):
 ```
 DYNAMODB_ENDPOINT=http://localhost:8000
 COGNITO_USER_POOL_ID=ap-southeast-2_XXXXXXXXX
 COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx
 AWS_REGION=ap-southeast-2
 SES_SENDER_EMAIL=noreply@reports.yourdomain.com
-EVENTBRIDGE_BUS_NAME=report-portal-events
-CLOUDFRONT_KEY_PAIR_ID=XXXXXXXXXXXXXXXXXX
-CLOUDFRONT_PRIVATE_KEY_SECRET_ARN=arn:aws:secretsmanager:...
-CLOUDFRONT_DOMAIN=https://portal.yourdomain.com
-FEEDBACK_BUCKET_NAME=report-portal-feedback-...
 ```
 
-## CDK Environment Configuration
+## User Journeys
 
-Environments are configured in `infrastructure/cdk.json` under the `environments` context key. Each environment specifies:
+### Super Admin
 
-```json
-{
-  "account": "123456789012",
-  "region": "ap-southeast-2",
-  "domainName": "portal.yourdomain.com",
-  "adminDomainName": "admin.yourdomain.com",
-  "sesDomain": "reports.yourdomain.com",
-  "allowedGeoLocations": ["AU"],
-  "wafRateLimit": 1000,
-  "signedCookieTtlHours": 3,
-  "invitationExpiryHours": 24,
-  "superAdminEmail": "admin@yourdomain.com",
-  "logRetentionDays": 30
-}
+```mermaid
+journey
+    title Super Admin Journey
+    section Authentication
+      Login with credentials: 5: Super Admin
+      Complete MFA challenge: 5: Super Admin
+    section Space Management
+      Create customer space: 5: Super Admin
+      Invite admin (@versent.com.au): 5: Super Admin
+      Invite customer to space: 5: Super Admin
+    section Report Management
+      Upload reports to space: 5: Super Admin
+      View report (iframe + full-tab): 5: Super Admin
+    section Monitoring
+      View analytics dashboard: 5: Super Admin
+      View audit log: 5: Super Admin
+    section Impersonation
+      Impersonate customer (read-only): 3: Super Admin
+      Exit impersonation: 5: Super Admin
+```
+
+### Admin
+
+```mermaid
+journey
+    title Admin Journey
+    section Authentication
+      Login with MFA: 5: Admin
+    section Space Management
+      View assigned spaces: 5: Admin
+      Upload report to space: 5: Admin
+      Invite customer: 4: Admin
+    section Feedback
+      View feedback threads: 5: Admin
+      Reply to customer: 5: Admin
+    section Monitoring
+      View space analytics: 5: Admin
+```
+
+### Customer
+
+```mermaid
+journey
+    title Customer Journey
+    section Onboarding
+      Receive invitation email: 5: Customer
+      Register (name, phone, company): 4: Customer
+      Setup MFA (TOTP): 4: Customer
+    section Report Viewing
+      Browse assigned spaces: 5: Customer
+      Open report (full-tab): 5: Customer
+    section Feedback
+      Submit feedback with attachment: 4: Customer
+      View admin reply: 5: Customer
+```
+
+### Invitation Flow
+
+```mermaid
+sequenceDiagram
+    actor Admin
+    participant API
+    participant DynamoDB
+    participant SES
+    participant Cognito
+    actor Customer
+
+    Admin->>API: POST invite (email, spaceId)
+    API->>DynamoDB: Store invitation (24hr TTL)
+    API->>SES: Send invitation email
+    SES-->>Customer: Email with link
+
+    Customer->>API: POST register (name, password)
+    API->>Cognito: Create user + set attributes
+    Customer->>Cognito: Setup MFA (TOTP)
+    Customer->>API: First login
+    API->>SES: Notify admin (invitation accepted)
 ```
