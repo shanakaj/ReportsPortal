@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { inviteCustomer } from '@/services/users';
+import { usePlatformSettings } from '@/hooks/usePlatformSettings';
 
 const inviteSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
@@ -27,6 +28,7 @@ interface InviteCustomerDialogProps {
   onOpenChange: (open: boolean) => void;
   spaceId: string;
   spaceName: string;
+  allowedCustomerDomains?: string[];
   onInvited: () => void;
 }
 
@@ -35,12 +37,14 @@ export function InviteCustomerDialog({
   onOpenChange,
   spaceId,
   spaceName,
+  allowedCustomerDomains,
   onInvited,
 }: InviteCustomerDialogProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [domainWarning, setDomainWarning] = useState(false);
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+  const { settings } = usePlatformSettings();
 
   const {
     register,
@@ -52,11 +56,20 @@ export function InviteCustomerDialog({
   });
 
   const checkDomainMismatch = (email: string): boolean => {
-    const domain = email.split('@')[1];
-    if (domain === 'versent.com.au') return false;
-    const spaceDomain = spaceName.toLowerCase();
+    const domain = email.split('@')[1]?.toLowerCase();
+    if (!domain) return false;
+
+    // Admin domains are always allowed
+    if (settings.allowedAdminDomains.some((d) => d.toLowerCase() === domain)) return false;
+
+    // Check against space's configured allowed domains
+    if (allowedCustomerDomains && allowedCustomerDomains.length > 0) {
+      return !allowedCustomerDomains.some((d) => d.toLowerCase() === domain);
+    }
+
+    // Fall back to space name matching
     const emailDomainBase = domain.split('.')[0].toLowerCase();
-    return emailDomainBase !== spaceDomain;
+    return emailDomainBase !== spaceName.toLowerCase();
   };
 
   const doInvite = async (email: string) => {
@@ -77,11 +90,26 @@ export function InviteCustomerDialog({
   };
 
   const handleFormSubmit = async (values: InviteFormValues) => {
+    const validationMode = settings.domainValidationMode;
+
+    if (validationMode === 'off') {
+      await doInvite(values.email);
+      return;
+    }
+
     if (checkDomainMismatch(values.email)) {
+      if (validationMode === 'strict') {
+        setError(
+          `Email domain does not match space "${spaceName}". Domain validation is set to strict mode.`,
+        );
+        return;
+      }
+      // warn mode
       setDomainWarning(true);
       setPendingEmail(values.email);
       return;
     }
+
     await doInvite(values.email);
   };
 

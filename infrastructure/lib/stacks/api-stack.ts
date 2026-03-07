@@ -33,6 +33,7 @@ export interface ApiStackProps extends cdk.StackProps {
   auditBucket: s3.IBucket;
   encryptionKey: kms.IKey;
   eventBus: events.IEventBus;
+  platformSettingsTable: dynamodb.ITable;
 }
 
 export class ApiStack extends cdk.Stack {
@@ -62,6 +63,7 @@ export class ApiStack extends cdk.Stack {
       auditBucket,
       encryptionKey,
       eventBus,
+      platformSettingsTable,
     } = props;
 
     // Common Lambda environment variables
@@ -87,6 +89,7 @@ export class ApiStack extends cdk.Stack {
       INVITATION_EXPIRY_HOURS: String(envConfig.invitationExpiryHours),
       PORTAL_DOMAIN: envConfig.domainName,
       ADMIN_DOMAIN: envConfig.adminDomainName,
+      PLATFORM_SETTINGS_TABLE: platformSettingsTable.tableName,
     };
 
     const backendCodePath = '../backend';
@@ -236,8 +239,9 @@ export class ApiStack extends cdk.Stack {
       feedbackThreadsTable, feedbackMessagesTable,
     ];
 
-    // Auth function: Cognito + Users + Invitations + AuditLog
+    // Auth function: Cognito + Users + Invitations + AuditLog + Settings (read)
     this.grantTableReadWrite(authFunction, [usersTable, invitationsTable, auditLogTable]);
+    this.grantTableRead(authFunction, [platformSettingsTable]);
     authFunction.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: [
@@ -253,8 +257,8 @@ export class ApiStack extends cdk.Stack {
       resources: [userPool.userPoolArn],
     }));
 
-    // Admin function: all tables + S3 + Cognito admin + EventBridge + SES
-    this.grantTableReadWrite(adminFunction, allTables);
+    // Admin function: all tables + settings + S3 + Cognito admin + EventBridge + SES
+    this.grantTableReadWrite(adminFunction, [...allTables, platformSettingsTable]);
     feedbackBucket.grantReadWrite(adminFunction.function);
     encryptionKey.grantEncryptDecrypt(adminFunction.function);
     adminFunction.addToRolePolicy(new iam.PolicyStatement({
@@ -510,6 +514,11 @@ export class ApiStack extends cdk.Stack {
     adminUserById.addResource('enable').addMethod('PUT', adminIntegration, authMethodOptions);
     adminUserById.addMethod('DELETE', adminIntegration, authMethodOptions);
     adminUserById.addResource('reset-mfa').addMethod('PUT', adminIntegration, authMethodOptions);
+
+    // Platform settings (super admin only)
+    const adminSettings = adminResource.addResource('settings');
+    adminSettings.addMethod('GET', adminIntegration, authMethodOptions);
+    adminSettings.addMethod('PUT', adminIntegration, authMethodOptions);
 
     // Super admin only
     adminResource.addResource('invite-admin').addMethod('POST', adminIntegration, authMethodOptions);

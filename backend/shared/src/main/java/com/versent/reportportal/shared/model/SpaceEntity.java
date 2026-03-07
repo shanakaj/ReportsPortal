@@ -7,6 +7,7 @@ import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbSecon
 import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbSortKey;
 
 import java.time.Instant;
+import java.util.List;
 
 @DynamoDbBean
 public class SpaceEntity {
@@ -19,6 +20,7 @@ public class SpaceEntity {
     private String createdBy;
     private Instant createdAt;
     private String status;
+    private List<String> allowedCustomerDomains;
 
     @DynamoDbPartitionKey
     @DynamoDbAttribute("PK")
@@ -93,6 +95,15 @@ public class SpaceEntity {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    @DynamoDbAttribute("allowedCustomerDomains")
+    public List<String> getAllowedCustomerDomains() {
+        return allowedCustomerDomains;
+    }
+
+    public void setAllowedCustomerDomains(List<String> allowedCustomerDomains) {
+        this.allowedCustomerDomains = allowedCustomerDomains;
     }
 
     public static String buildPk(String spaceId) {

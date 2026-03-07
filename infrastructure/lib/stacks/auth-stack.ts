@@ -31,11 +31,21 @@ export class AuthStack extends cdk.Stack {
       memorySize: 512,
       timeout: cdk.Duration.seconds(10),
       environment: {
-        ALLOWED_ADMIN_DOMAIN: 'versent.com.au',
+        ALLOWED_ADMIN_DOMAIN: envConfig.allowedAdminDomains || 'versent.com.au',
         ENVIRONMENT: environmentName,
+        PLATFORM_SETTINGS_TABLE: `report-portal-platform-settings-${environmentName}`,
       },
       tracing: lambda.Tracing.ACTIVE,
     });
+
+    // Grant pre-signup trigger read access to platform settings table
+    preSignupFunction.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['dynamodb:GetItem'],
+      resources: [
+        `arn:aws:dynamodb:${cdk.Aws.REGION}:${cdk.Aws.ACCOUNT_ID}:table/report-portal-platform-settings-${environmentName}`,
+      ],
+    }));
 
     // Enable SnapStart on pre-signup trigger
     const cfnPreSignup = preSignupFunction.node.defaultChild as lambda.CfnFunction;

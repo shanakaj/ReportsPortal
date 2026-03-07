@@ -14,18 +14,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { inviteAdmin } from '@/services/users';
+import { usePlatformSettings } from '@/hooks/usePlatformSettings';
 
-const inviteAdminSchema = z.object({
-  email: z
-    .string()
-    .email('Please enter a valid email address')
-    .refine(
-      (email) => email.endsWith('@versent.com.au'),
-      'Admin accounts must use @versent.com.au email addresses',
-    ),
-});
-
-type InviteAdminFormValues = z.infer<typeof inviteAdminSchema>;
+type InviteAdminFormValues = { email: string };
 
 interface InviteAdminDialogProps {
   open: boolean;
@@ -36,6 +27,23 @@ interface InviteAdminDialogProps {
 export function InviteAdminDialog({ open, onOpenChange, onInvited }: InviteAdminDialogProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { settings } = usePlatformSettings();
+
+  const allowedDomains = settings.allowedAdminDomains;
+  const domainsStr = allowedDomains.map((d) => `@${d}`).join(', ');
+
+  const inviteAdminSchema = z.object({
+    email: z
+      .string()
+      .email('Please enter a valid email address')
+      .refine(
+        (email) => {
+          const domain = email.split('@')[1]?.toLowerCase();
+          return allowedDomains.some((d) => d.toLowerCase() === domain);
+        },
+        `Admin accounts must use one of: ${domainsStr}`,
+      ),
+  });
 
   const {
     register,
@@ -67,8 +75,8 @@ export function InviteAdminDialog({ open, onOpenChange, onInvited }: InviteAdmin
         <DialogHeader>
           <DialogTitle>Invite Admin</DialogTitle>
           <DialogDescription>
-            Invite a new admin to the Report Portal. Only @versent.com.au email addresses are
-            permitted.
+            Invite a new admin to the {settings.organizationName}. Only {domainsStr} email
+            addresses are permitted.
           </DialogDescription>
         </DialogHeader>
 
@@ -78,7 +86,7 @@ export function InviteAdminDialog({ open, onOpenChange, onInvited }: InviteAdmin
             <Input
               id="adminEmail"
               type="email"
-              placeholder="name@versent.com.au"
+              placeholder={`name@${allowedDomains[0] || 'company.com'}`}
               {...register('email')}
             />
             {errors.email && (

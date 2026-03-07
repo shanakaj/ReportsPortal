@@ -20,6 +20,7 @@ dynamodb:
     reports: ${REPORTS_TABLE:ReportPortal-Reports}
     audit-log: ${AUDIT_LOG_TABLE:ReportPortal-AuditLog}
     notifications: ${NOTIFICATIONS_TABLE:ReportPortal-Notifications}
+    platform-settings: ${PLATFORM_SETTINGS_TABLE:ReportPortal-PlatformSettings}
 
 cloudfront:
   domain: ${CLOUDFRONT_DOMAIN:reports.yourdomain.com}

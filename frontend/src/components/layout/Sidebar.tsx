@@ -7,9 +7,11 @@ import {
   MessageSquare,
   BarChart3,
   FileText,
+  Settings,
   X,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
+import { usePlatformSettings } from '@/hooks/usePlatformSettings';
 import { Role } from '@/types';
 
 interface SidebarProps {
@@ -26,6 +28,7 @@ interface NavItem {
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const { user } = useAuth();
+  const { settings } = usePlatformSettings();
   const isAdmin = user?.role === Role.SUPER_ADMIN || user?.role === Role.ADMIN;
 
   const adminNavItems: NavItem[] = [
@@ -35,6 +38,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     { label: 'Feedback Inbox', to: '/admin/feedback', icon: <MessageSquare className="h-5 w-5" /> },
     { label: 'Analytics', to: '/admin/analytics', icon: <BarChart3 className="h-5 w-5" /> },
     { label: 'Audit Log', to: '/admin/audit-log', icon: <FileText className="h-5 w-5" /> },
+    { label: 'Settings', to: '/admin/settings', icon: <Settings className="h-5 w-5" /> },
   ];
 
   const customerNavItems: NavItem[] = [
@@ -61,7 +65,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         )}
       >
         <div className="flex h-16 items-center justify-between border-b px-6">
-          <h1 className="text-lg font-bold text-primary">Report Portal</h1>
+          <h1 className="text-lg font-bold text-primary">{settings.organizationName}</h1>
           <button
             type="button"
             onClick={onClose}

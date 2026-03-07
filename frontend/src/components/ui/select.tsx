@@ -20,18 +20,20 @@ interface SelectProps {
   value?: string;
   defaultValue?: string;
   onValueChange?: (value: string) => void;
+  disabled?: boolean;
   children: React.ReactNode;
 }
 
-function Select({ value: controlledValue, defaultValue = '', onValueChange, children }: SelectProps) {
+function Select({ value: controlledValue, defaultValue = '', onValueChange, disabled, children }: SelectProps) {
   const [internalValue, setInternalValue] = useState(defaultValue);
   const [open, setOpen] = useState(false);
   const value = controlledValue ?? internalValue;
-  const handleChange = onValueChange ?? setInternalValue;
+  const handleChange = disabled ? () => {} : (onValueChange ?? setInternalValue);
+  const handleSetOpen = disabled ? () => {} : setOpen;
 
   return (
-    <SelectContext.Provider value={{ value, onValueChange: handleChange, open, setOpen }}>
-      <div className="relative">{children}</div>
+    <SelectContext.Provider value={{ value, onValueChange: handleChange, open, setOpen: handleSetOpen }}>
+      <div className={cn('relative', disabled && 'pointer-events-none opacity-50')}>{children}</div>
     </SelectContext.Provider>
   );
 }

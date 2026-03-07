@@ -13,6 +13,7 @@ import { UsersPage } from '@/pages/admin/UsersPage';
 import { AnalyticsPage } from '@/pages/admin/AnalyticsPage';
 import { AuditLogPage } from '@/pages/admin/AuditLogPage';
 import { FeedbackInboxPage } from '@/pages/admin/FeedbackInboxPage';
+import { SettingsPage } from '@/pages/admin/SettingsPage';
 import { ReportViewPage as AdminReportViewPage } from '@/pages/admin/ReportViewPage';
 import { MySpacesPage } from '@/pages/customer/MySpacesPage';
 import { ReportsPage } from '@/pages/customer/ReportsPage';
@@ -65,6 +66,7 @@ function App() {
         <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="audit-log" element={<AuditLogPage />} />
         <Route path="feedback" element={<FeedbackInboxPage />} />
+        <Route path="settings" element={<SettingsPage />} />
       </Route>
 
       {/* Customer routes */}

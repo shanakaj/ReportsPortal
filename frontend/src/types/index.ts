@@ -30,6 +30,22 @@ export interface Space {
   status: 'active' | 'provisioning' | 'deleted';
   reportCount?: number;
   userCount?: number;
+  allowedCustomerDomains?: string[];
+}
+
+export interface PlatformSettings {
+  organizationName: string;
+  organizationLegalEntity: string;
+  allowedAdminDomains: string[];
+  domainValidationMode: 'off' | 'warn' | 'strict';
+  maxReportFileSizeMb: number;
+  maxFeedbackAttachmentSizeMb: number;
+  signedCookieTtlHours: number;
+  invitationExpiryHours: number;
+  notifyOnInvitationAccepted: boolean;
+  notifyFeedbackByEmail: boolean;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 export interface Report {

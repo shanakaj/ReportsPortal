@@ -100,6 +100,7 @@ export function SpaceDetailPage() {
         onOpenChange={setShowInvite}
         spaceId={spaceId}
         spaceName={space.spaceName}
+        allowedCustomerDomains={space.allowedCustomerDomains}
         onInvited={() =>
           queryClient.invalidateQueries({ queryKey: ['users', spaceId] })
         }
