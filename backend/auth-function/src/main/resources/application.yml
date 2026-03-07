@@ -3,9 +3,6 @@ spring:
     name: auth-function
   main:
     web-application-type: servlet
-  cloud:
-    function:
-      definition: authFunction
 
 cognito:
   user-pool-id: ${COGNITO_USER_POOL_ID:ap-southeast-2_placeholder}

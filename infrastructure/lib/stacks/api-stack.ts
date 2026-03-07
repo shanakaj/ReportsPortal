@@ -97,7 +97,7 @@ export class ApiStack extends cdk.Stack {
     const authFunction = new JavaLambdaFunction(this, 'AuthFunction', {
       functionName: 'auth',
       description: 'Handles authentication flows (login, MFA, password reset)',
-      handler: 'com.versent.reportportal.auth.handler.AuthHandler::handleRequest',
+      handler: 'com.versent.reportportal.auth.StreamLambdaHandler',
       codePath: `${backendCodePath}/auth-function/target/auth-function.jar`,
       memorySize: 1024,
       timeout: cdk.Duration.seconds(30),
@@ -109,7 +109,7 @@ export class ApiStack extends cdk.Stack {
     const adminFunction = new JavaLambdaFunction(this, 'AdminFunction', {
       functionName: 'admin',
       description: 'Handles admin operations (spaces, users, reports, impersonation)',
-      handler: 'com.versent.reportportal.admin.handler.AdminHandler::handleRequest',
+      handler: 'com.versent.reportportal.admin.StreamLambdaHandler',
       codePath: `${backendCodePath}/admin-function/target/admin-function.jar`,
       memorySize: 1536,
       timeout: cdk.Duration.seconds(30),
@@ -121,7 +121,7 @@ export class ApiStack extends cdk.Stack {
     const customerFunction = new JavaLambdaFunction(this, 'CustomerFunction', {
       functionName: 'customer',
       description: 'Handles customer operations (spaces, reports, preferences)',
-      handler: 'com.versent.reportportal.customer.handler.CustomerHandler::handleRequest',
+      handler: 'com.versent.reportportal.customer.StreamLambdaHandler',
       codePath: `${backendCodePath}/customer-function/target/customer-function.jar`,
       memorySize: 1024,
       timeout: cdk.Duration.seconds(30),
@@ -133,7 +133,7 @@ export class ApiStack extends cdk.Stack {
     const feedbackFunction = new JavaLambdaFunction(this, 'FeedbackFunction', {
       functionName: 'feedback',
       description: 'Handles feedback threads, messages, and attachments',
-      handler: 'com.versent.reportportal.feedback.handler.FeedbackHandler::handleRequest',
+      handler: 'com.versent.reportportal.feedback.StreamLambdaHandler',
       codePath: `${backendCodePath}/feedback-function/target/feedback-function.jar`,
       memorySize: 1024,
       timeout: cdk.Duration.seconds(30),
@@ -145,7 +145,7 @@ export class ApiStack extends cdk.Stack {
     const analyticsFunction = new JavaLambdaFunction(this, 'AnalyticsFunction', {
       functionName: 'analytics',
       description: 'Handles analytics data collection and reporting',
-      handler: 'com.versent.reportportal.analytics.handler.AnalyticsHandler::handleRequest',
+      handler: 'com.versent.reportportal.analytics.StreamLambdaHandler',
       codePath: `${backendCodePath}/analytics-function/target/analytics-function.jar`,
       memorySize: 1024,
       timeout: cdk.Duration.seconds(30),
@@ -157,7 +157,7 @@ export class ApiStack extends cdk.Stack {
     const auditFunction = new JavaLambdaFunction(this, 'AuditFunction', {
       functionName: 'audit',
       description: 'Handles audit log queries',
-      handler: 'com.versent.reportportal.audit.handler.AuditHandler::handleRequest',
+      handler: 'com.versent.reportportal.audit.StreamLambdaHandler',
       codePath: `${backendCodePath}/audit-function/target/audit-function.jar`,
       memorySize: 1024,
       timeout: cdk.Duration.seconds(30),
@@ -169,7 +169,7 @@ export class ApiStack extends cdk.Stack {
     const notificationFunction = new JavaLambdaFunction(this, 'NotificationFunction', {
       functionName: 'notification',
       description: 'Handles notification delivery (EventBridge target) and notification queries',
-      handler: 'com.versent.reportportal.notification.handler.NotificationHandler::handleRequest',
+      handler: 'com.versent.reportportal.notification.StreamLambdaHandler',
       codePath: `${backendCodePath}/notification-function/target/notification-function.jar`,
       memorySize: 1024,
       timeout: cdk.Duration.seconds(30),

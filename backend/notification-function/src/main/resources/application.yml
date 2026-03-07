@@ -3,9 +3,6 @@ spring:
     name: notification-function
   main:
     web-application-type: servlet
-  cloud:
-    function:
-      definition: eventBridgeHandler
 
 cognito:
   user-pool-id: ${COGNITO_USER_POOL_ID:ap-southeast-2_placeholder}

@@ -8,7 +8,6 @@ import com.versent.reportportal.shared.security.SecurityContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,7 +29,6 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
 
 @SpringBootApplication
 @ComponentScan(basePackages = {
@@ -135,14 +133,6 @@ public class NotificationHandler {
         }
 
         return ResponseEntity.ok(Map.of("unreadCount", count));
-    }
-
-    @Bean
-    public Function<Map<String, Object>, String> eventBridgeHandler() {
-        return event -> {
-            deliveryService.processEvent(event);
-            return "OK";
-        };
     }
 
     private PaginatedResponse<NotificationDto> queryAllNotifications(String userId, String cursor, int limit) {
