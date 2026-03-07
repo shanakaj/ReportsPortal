@@ -82,7 +82,19 @@ jobs:
         working-directory: e2e
         run: npx playwright install --with-deps ${{ inputs.browser == 'all' && '' || inputs.browser || 'chromium' }}
 
+      - name: Check WAF geo-restriction
+        id: geo-check
+        run: |
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ steps.get-url.outputs.base_url }}")
+          if [ "$HTTP_STATUS" == "403" ]; then
+            echo "⚠ WAF geo-restriction detected (403). Runner is outside allowed geo (AU)."
+            echo "geo_blocked=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "geo_blocked=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run E2E tests
+        if: steps.geo-check.outputs.geo_blocked != 'true'
         working-directory: e2e
         env:
           BASE_URL: ${{ steps.get-url.outputs.base_url }}
@@ -96,6 +108,10 @@ jobs:
           else
             npx playwright test --project="$BROWSER_PROJECT"
           fi
+
+      - name: Skip notice (geo-blocked)
+        if: steps.geo-check.outputs.geo_blocked == 'true'
+        run: echo "⚠ E2E tests skipped — WAF geo-restriction blocks runner IP (outside AU)"
 
       - name: Upload test report
         uses: actions/upload-artifact@v4
