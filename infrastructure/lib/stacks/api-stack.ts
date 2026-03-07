@@ -588,6 +588,7 @@ export class ApiStack extends cdk.Stack {
       allowedGeoLocations: envConfig.allowedGeoLocations,
       cloudFrontHeaderName: this.originVerifyHeaderName,
       cloudFrontHeaderValue: this.originVerifyHeaderValue,
+      enableOriginHeaderValidation: true,
     });
 
     // Associate WAF with API Gateway stage

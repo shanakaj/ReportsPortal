@@ -10,6 +10,7 @@ export interface WafWebAclProps {
   allowedGeoLocations: string[];
   cloudFrontHeaderName?: string;
   cloudFrontHeaderValue?: string;
+  enableOriginHeaderValidation?: boolean;
 }
 
 export class WafWebAcl extends Construct {
@@ -27,6 +28,7 @@ export class WafWebAcl extends Construct {
       allowedGeoLocations,
       cloudFrontHeaderName = 'x-origin-verify',
       cloudFrontHeaderValue = cdk.Fn.select(2, cdk.Fn.split('/', cdk.Aws.STACK_ID)),
+      enableOriginHeaderValidation = false,
     } = props;
 
     const rules: wafv2.CfnWebACL.RuleProperty[] = [
@@ -142,8 +144,12 @@ export class WafWebAcl extends Construct {
           metricName: `${name}-IPReputation`,
         },
       },
-      // Rule 7: CloudFront header validation (prevent origin bypass)
-      {
+    ];
+
+    // Rule 7: CloudFront header validation (prevent origin bypass)
+    // Only added to Regional WAFs protecting API Gateway, not CloudFront-facing WAFs
+    if (enableOriginHeaderValidation) {
+      rules.push({
         name: 'CloudFrontHeaderValidation',
         priority: 7,
         action: { block: {} },
@@ -173,8 +179,8 @@ export class WafWebAcl extends Construct {
           cloudWatchMetricsEnabled: true,
           metricName: `${name}-CloudFrontHeader`,
         },
-      },
-    ];
+      });
+    }
 
     this.webAcl = new wafv2.CfnWebACL(this, 'WebACL', {
       name,
