@@ -7,6 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '@/hooks/useAuth';
 import { Role } from '@/types';
 
@@ -58,10 +59,6 @@ export function MfaSetupPage() {
     ? `otpauth://totp/ReportPortal?secret=${secretCode}&issuer=ReportPortal`
     : '';
 
-  const qrCodeUrl = secretCode
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(otpauthUri)}`
-    : '';
-
   const handleVerify = async (values: VerifyFormValues) => {
     setIsLoading(true);
     setError(null);
@@ -102,9 +99,9 @@ export function MfaSetupPage() {
               then enter the 6-digit code below.</p>
           </div>
 
-          {qrCodeUrl && (
+          {otpauthUri && (
             <div className="flex justify-center">
-              <img src={qrCodeUrl} alt="TOTP QR Code" width={200} height={200} />
+              <QRCodeSVG value={otpauthUri} size={200} />
             </div>
           )}
 
