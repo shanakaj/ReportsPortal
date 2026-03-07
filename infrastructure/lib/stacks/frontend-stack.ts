@@ -224,6 +224,25 @@ function handler(event) {
 
     const apiCachePolicy = cloudfront.CachePolicy.CACHING_DISABLED;
 
+    // CloudFront Function for SPA routing — rewrites non-asset paths to /index.html
+    // This replaces global errorResponses which would interfere with /api/* and /reports/* behaviors
+    const spaRewrite = new cloudfront.Function(this, 'SpaRewrite', {
+      functionName: `report-portal-spa-rewrite-${environmentName}`,
+      comment: 'Rewrite SPA routes to /index.html for client-side routing',
+      code: cloudfront.FunctionCode.fromInline(`
+function handler(event) {
+  var request = event.request;
+  var uri = request.uri;
+  if (uri.includes('.')) {
+    return request;
+  }
+  request.uri = '/index.html';
+  return request;
+}
+      `.trim()),
+      runtime: cloudfront.FunctionRuntime.JS_2_0,
+    });
+
     // ========== Consolidated CloudFront Distribution ==========
     // Serves: SPA (default), API (/api/*), and reports (/reports/* with signed cookies)
 
@@ -238,6 +257,12 @@ function handler(event) {
         responseHeadersPolicy: portalSecurityHeaders,
         compress: true,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+        functionAssociations: [
+          {
+            function: spaRewrite,
+            eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
+          },
+        ],
       },
       additionalBehaviors: {
         '/api/*': {
@@ -273,20 +298,6 @@ function handler(event) {
         },
       },
       defaultRootObject: 'index.html',
-      errorResponses: [
-        {
-          httpStatus: 403,
-          responseHttpStatus: 200,
-          responsePagePath: '/index.html',
-          ttl: cdk.Duration.seconds(0),
-        },
-        {
-          httpStatus: 404,
-          responseHttpStatus: 200,
-          responsePagePath: '/index.html',
-          ttl: cdk.Duration.seconds(0),
-        },
-      ],
       minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
       httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
       webAclId: webAclArn,
