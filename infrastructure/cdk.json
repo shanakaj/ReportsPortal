@@ -23,7 +23,7 @@
         "domainName": "dev.reports.yourdomain.com",
         "adminDomainName": "dev.admin.yourdomain.com",
         "sesDomain": "dev.reports.yourdomain.com",
-        "allowedGeoLocations": ["AU"],
+        "allowedGeoLocations": ["AU", "US"],
         "wafRateLimit": 1000,
         "signedCookieTtlHours": 3,
         "invitationExpiryHours": 24,
