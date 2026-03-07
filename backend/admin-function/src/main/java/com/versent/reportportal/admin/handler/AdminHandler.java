@@ -5,6 +5,7 @@ import com.versent.reportportal.admin.dto.ImpersonationResponse;
 import com.versent.reportportal.admin.dto.InviteAdminRequest;
 import com.versent.reportportal.admin.dto.InviteUserRequest;
 import com.versent.reportportal.admin.dto.ReportResponse;
+import com.versent.reportportal.admin.dto.ReportViewResponse;
 import com.versent.reportportal.admin.dto.SpaceResponse;
 import com.versent.reportportal.admin.dto.UploadReportRequest;
 import com.versent.reportportal.admin.dto.UploadReportResponse;
@@ -106,6 +107,26 @@ public class AdminHandler {
         roleChecker.requireNotReadOnly();
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(reportService.initiateUpload(spaceId, request));
+    }
+
+    @GetMapping("/spaces/{spaceId}/reports/{reportId}")
+    public ResponseEntity<ReportViewResponse> getReport(
+            @PathVariable String spaceId,
+            @PathVariable String reportId) {
+        roleChecker.requireAdminWithSpaceAccess(spaceId);
+        return ResponseEntity.ok(reportService.getReport(spaceId, reportId));
+    }
+
+    @PostMapping("/spaces/{spaceId}/reports/{reportId}/assets")
+    public ResponseEntity<UploadReportResponse> uploadReportAsset(
+            @PathVariable String spaceId,
+            @PathVariable String reportId,
+            @Valid @RequestBody UploadReportRequest request) {
+        roleChecker.requireAdminWithSpaceAccess(spaceId);
+        roleChecker.requireNotReadOnly();
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(reportService.generateAssetUploadUrl(spaceId, reportId,
+                        request.fileName(), request.contentType()));
     }
 
     @DeleteMapping("/spaces/{spaceId}/reports/{reportId}")

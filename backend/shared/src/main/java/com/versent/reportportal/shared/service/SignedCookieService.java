@@ -1,4 +1,4 @@
-package com.versent.reportportal.customer.service;
+package com.versent.reportportal.shared.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
