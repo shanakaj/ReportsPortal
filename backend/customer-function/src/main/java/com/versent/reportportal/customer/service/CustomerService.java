@@ -12,6 +12,7 @@ import com.versent.reportportal.shared.model.SpaceEntity;
 import com.versent.reportportal.shared.model.UserEntity;
 import com.versent.reportportal.shared.security.SecurityContext;
 import com.versent.reportportal.shared.service.AuditService;
+import com.versent.reportportal.shared.service.SignedCookieService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;

@@ -23,6 +23,7 @@ export class StorageStack extends cdk.Stack {
   public readonly notificationsTable: dynamodb.Table;
   public readonly feedbackThreadsTable: dynamodb.Table;
   public readonly feedbackMessagesTable: dynamodb.Table;
+  public readonly platformSettingsTable: dynamodb.Table;
 
   constructor(scope: Construct, id: string, props: StorageStackProps) {
     super(scope, id, props);
@@ -275,6 +276,18 @@ export class StorageStack extends cdk.Stack {
     // FeedbackMessages Table — PK: THREAD#{threadId}, SK: MSG#{timestamp}#{messageId}
     this.feedbackMessagesTable = new dynamodb.Table(this, 'FeedbackMessagesTable', {
       tableName: `report-portal-feedback-messages-${environmentName}`,
+      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.CUSTOMER_MANAGED,
+      encryptionKey: this.encryptionKey,
+      pointInTimeRecovery: true,
+      removalPolicy,
+    });
+
+    // PlatformSettings Table — PK: SETTINGS, SK: GLOBAL (single-item table)
+    this.platformSettingsTable = new dynamodb.Table(this, 'PlatformSettingsTable', {
+      tableName: `report-portal-platform-settings-${environmentName}`,
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,

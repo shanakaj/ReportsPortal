@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react';
-import { Upload, FileText, Image, X } from 'lucide-react';
+import { Upload, FileText, Image, X, FileSpreadsheet, File as FileIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { getReportUploadUrl, getAssetUploadUrl, uploadReportFile } from '@/services/reports';
 import { cn } from '@/lib/utils';
+import { getFileExtension, getMimeType, getFileTypeCategory } from '@/lib/file-utils';
 
 interface ReportUploadProps {
   spaceId: string;
@@ -10,32 +11,46 @@ interface ReportUploadProps {
   disabled?: boolean;
 }
 
-const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/svg+xml', 'image/webp'];
 const MAX_SIZE = 50 * 1024 * 1024; // 50MB per file
 
-function getMimeType(file: File): string {
-  if (file.type) return file.type;
-  const ext = file.name.split('.').pop()?.toLowerCase();
-  const mimeMap: Record<string, string> = {
-    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-    gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp',
-    html: 'text/html', htm: 'text/html',
-  };
-  return mimeMap[ext || ''] || 'application/octet-stream';
-}
+const ACCEPTED_EXTENSIONS =
+  '.html,.htm,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.gif,.svg,.webp';
 
-function isHtmlFile(file: File): boolean {
-  return file.name.endsWith('.html') || file.name.endsWith('.htm');
+function isReportFile(file: File): boolean {
+  const cat = getFileTypeCategory(file.name);
+  return cat === 'html' || cat === 'pdf' || cat === 'document' || cat === 'spreadsheet' || cat === 'presentation';
 }
 
 function isImageFile(file: File): boolean {
-  const mime = getMimeType(file);
-  return ACCEPTED_IMAGE_TYPES.includes(mime);
+  return getFileTypeCategory(file.name) === 'image';
+}
+
+function isHtmlFile(file: File): boolean {
+  const ext = getFileExtension(file.name);
+  return ext === 'html' || ext === 'htm';
+}
+
+function FileTypeIcon({ fileName, className }: { fileName: string; className?: string }) {
+  const cat = getFileTypeCategory(fileName);
+  switch (cat) {
+    case 'pdf':
+      return <FileText className={cn('text-red-500', className)} />;
+    case 'spreadsheet':
+      return <FileSpreadsheet className={cn('text-green-600', className)} />;
+    case 'presentation':
+      return <FileIcon className={cn('text-orange-500', className)} />;
+    case 'document':
+      return <FileText className={cn('text-blue-500', className)} />;
+    case 'image':
+      return <Image className={cn('text-purple-500', className)} />;
+    default:
+      return <FileText className={cn('text-primary', className)} />;
+  }
 }
 
 export function ReportUpload({ spaceId, onUploaded, disabled }: ReportUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
-  const [htmlFile, setHtmlFile] = useState<File | null>(null);
+  const [reportFile, setReportFile] = useState<File | null>(null);
   const [assetFiles, setAssetFiles] = useState<File[]>([]);
   const [progress, setProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
@@ -53,30 +68,45 @@ export function ReportUpload({ spaceId, onUploaded, disabled }: ReportUploadProp
       }
     }
 
-    const html = fileArray.find(isHtmlFile);
+    const report = fileArray.find(isReportFile);
     const images = fileArray.filter(isImageFile);
-    const unrecognized = fileArray.filter(f => !isHtmlFile(f) && !isImageFile(f));
+    const unrecognized = fileArray.filter(f => !isReportFile(f) && !isImageFile(f));
 
     if (unrecognized.length > 0) {
-      setError(`Unsupported file type: ${unrecognized[0].name}. Use HTML and image files.`);
+      setError(
+        `Unsupported file type: ${unrecognized[0].name}. ` +
+        'Supported: HTML, PDF, Word, Excel, PowerPoint, and image files.',
+      );
       return;
     }
 
-    if (html) {
-      setHtmlFile(html);
-    }
-    if (images.length > 0) {
-      setAssetFiles(prev => {
-        const existingNames = new Set(prev.map(f => f.name));
-        const newImages = images.filter(f => !existingNames.has(f.name));
-        return [...prev, ...newImages];
-      });
+    if (report) {
+      setReportFile(report);
+      // Only allow asset images alongside HTML reports
+      if (!isHtmlFile(report)) {
+        setAssetFiles([]);
+      }
     }
 
-    if (!html && images.length === 0) {
-      setError('Please select an HTML report file, optionally with image files.');
+    // Only add asset images if the main report is HTML
+    if (images.length > 0) {
+      const currentReport = report || reportFile;
+      if (currentReport && isHtmlFile(currentReport)) {
+        setAssetFiles(prev => {
+          const existingNames = new Set(prev.map(f => f.name));
+          const newImages = images.filter(f => !existingNames.has(f.name));
+          return [...prev, ...newImages];
+        });
+      } else if (!report && !reportFile) {
+        // No report file yet — just images dropped alone
+        setError('Please select a report file first. Images can only be added alongside HTML reports.');
+      }
     }
-  }, []);
+
+    if (!report && images.length === 0) {
+      setError('Please select a report file (HTML, PDF, Word, Excel, or PowerPoint).');
+    }
+  }, [reportFile]);
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -94,13 +124,13 @@ export function ReportUpload({ spaceId, onUploaded, disabled }: ReportUploadProp
   };
 
   const clearAll = () => {
-    setHtmlFile(null);
+    setReportFile(null);
     setAssetFiles([]);
     setError(null);
   };
 
   const handleUpload = async () => {
-    if (!htmlFile) return;
+    if (!reportFile) return;
     setIsUploading(true);
     setError(null);
     setProgress(0);
@@ -109,19 +139,21 @@ export function ReportUpload({ spaceId, onUploaded, disabled }: ReportUploadProp
       const totalFiles = 1 + assetFiles.length;
       let filesUploaded = 0;
 
-      // 1. Upload the HTML report
-      setUploadStatus(`Uploading ${htmlFile.name}...`);
-      const { uploadUrl, reportId } = await getReportUploadUrl(spaceId, htmlFile.name, 'text/html');
-      await uploadReportFile(uploadUrl, htmlFile, (p) => {
+      // 1. Upload the main report file
+      setUploadStatus(`Uploading ${reportFile.name}...`);
+      const contentType = getMimeType(reportFile.name, reportFile.type);
+      const { uploadUrl, reportId } = await getReportUploadUrl(spaceId, reportFile.name, contentType);
+      await uploadReportFile(uploadUrl, reportFile, (p) => {
         setProgress(Math.round((filesUploaded * 100 + p) / totalFiles));
       });
       filesUploaded++;
 
-      // 2. Upload each asset file
+      // 2. Upload each asset file (only for HTML reports)
       for (const asset of assetFiles) {
         setUploadStatus(`Uploading ${asset.name}...`);
+        const assetType = getMimeType(asset.name, asset.type);
         const { uploadUrl: assetUrl } = await getAssetUploadUrl(
-          spaceId, reportId, asset.name, getMimeType(asset),
+          spaceId, reportId, asset.name, assetType,
         );
         await uploadReportFile(assetUrl, asset, (p) => {
           setProgress(Math.round((filesUploaded * 100 + p) / totalFiles));
@@ -141,7 +173,8 @@ export function ReportUpload({ spaceId, onUploaded, disabled }: ReportUploadProp
     }
   };
 
-  const hasFiles = htmlFile || assetFiles.length > 0;
+  const hasFiles = reportFile || assetFiles.length > 0;
+  const showAssetHint = reportFile && isHtmlFile(reportFile);
 
   return (
     <div className="space-y-4">
@@ -160,18 +193,18 @@ export function ReportUpload({ spaceId, onUploaded, disabled }: ReportUploadProp
       >
         {hasFiles ? (
           <div className="space-y-3">
-            {htmlFile && (
+            {reportFile && (
               <div className="flex items-center justify-center gap-3">
-                <FileText className="h-6 w-6 text-primary" />
+                <FileTypeIcon fileName={reportFile.name} className="h-6 w-6" />
                 <div className="text-left">
-                  <p className="text-sm font-medium">{htmlFile.name}</p>
+                  <p className="text-sm font-medium">{reportFile.name}</p>
                   <p className="text-xs text-muted-foreground">
-                    {(htmlFile.size / 1024 / 1024).toFixed(2)} MB
+                    {(reportFile.size / 1024 / 1024).toFixed(2)} MB
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setHtmlFile(null)}
+                  onClick={() => { setReportFile(null); setAssetFiles([]); }}
                   className="ml-2 rounded-md p-1 hover:bg-accent"
                 >
                   <X className="h-4 w-4" />
@@ -201,24 +234,21 @@ export function ReportUpload({ spaceId, onUploaded, disabled }: ReportUploadProp
                 ))}
               </div>
             )}
-            {!htmlFile && (
-              <p className="text-xs text-amber-600">
-                Add an HTML report file to upload
-              </p>
+            {showAssetHint && (
+              <label className="cursor-pointer text-xs text-primary hover:underline">
+                Add image files
+                <input
+                  type="file"
+                  accept=".png,.jpg,.jpeg,.gif,.svg,.webp"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files) handleFiles(e.target.files);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
             )}
-            <label className="cursor-pointer text-xs text-primary hover:underline">
-              Add more files
-              <input
-                type="file"
-                accept=".html,.htm,.png,.jpg,.jpeg,.gif,.svg,.webp"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  if (e.target.files) handleFiles(e.target.files);
-                  e.target.value = '';
-                }}
-              />
-            </label>
           </div>
         ) : (
           <div className="flex flex-col items-center gap-2">
@@ -229,7 +259,7 @@ export function ReportUpload({ spaceId, onUploaded, disabled }: ReportUploadProp
                 browse
                 <input
                   type="file"
-                  accept=".html,.htm,.png,.jpg,.jpeg,.gif,.svg,.webp"
+                  accept={ACCEPTED_EXTENSIONS}
                   multiple
                   className="hidden"
                   onChange={(e) => {
@@ -240,7 +270,7 @@ export function ReportUpload({ spaceId, onUploaded, disabled }: ReportUploadProp
               </label>
             </p>
             <p className="text-xs text-muted-foreground">
-              HTML report with optional images (PNG, JPG, SVG). Max 50MB per file.
+              HTML, PDF, Word, Excel, PowerPoint. HTML reports can include images. Max 50MB per file.
             </p>
           </div>
         )}
@@ -264,7 +294,7 @@ export function ReportUpload({ spaceId, onUploaded, disabled }: ReportUploadProp
         <p className="text-sm text-destructive">{error}</p>
       )}
 
-      {htmlFile && !isUploading && (
+      {reportFile && !isUploading && (
         <Button onClick={handleUpload} disabled={disabled} className="w-full">
           Upload Report{assetFiles.length > 0 ? ` + ${assetFiles.length} image${assetFiles.length > 1 ? 's' : ''}` : ''}
         </Button>

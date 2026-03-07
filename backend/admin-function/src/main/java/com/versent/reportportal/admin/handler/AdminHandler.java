@@ -4,7 +4,10 @@ import com.versent.reportportal.admin.dto.CreateSpaceRequest;
 import com.versent.reportportal.admin.dto.ImpersonationResponse;
 import com.versent.reportportal.admin.dto.InviteAdminRequest;
 import com.versent.reportportal.admin.dto.InviteUserRequest;
+import com.versent.reportportal.admin.dto.PlatformSettingsRequest;
+import com.versent.reportportal.admin.dto.PlatformSettingsResponse;
 import com.versent.reportportal.admin.dto.ReportResponse;
+import com.versent.reportportal.admin.dto.ReportViewResponse;
 import com.versent.reportportal.admin.dto.SpaceResponse;
 import com.versent.reportportal.admin.dto.UploadReportRequest;
 import com.versent.reportportal.admin.dto.UploadReportResponse;
@@ -14,7 +17,10 @@ import com.versent.reportportal.admin.service.ReportService;
 import com.versent.reportportal.admin.service.SpaceService;
 import com.versent.reportportal.admin.service.UserManagementService;
 import com.versent.reportportal.shared.dto.PaginatedResponse;
+import com.versent.reportportal.shared.model.PlatformSettingsEntity;
 import com.versent.reportportal.shared.security.RoleChecker;
+import com.versent.reportportal.shared.security.SecurityContext;
+import com.versent.reportportal.shared.service.PlatformSettingsService;
 import jakarta.validation.Valid;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -44,17 +50,20 @@ public class AdminHandler {
     private final ReportService reportService;
     private final UserManagementService userManagementService;
     private final ImpersonationService impersonationService;
+    private final PlatformSettingsService platformSettingsService;
     private final RoleChecker roleChecker;
 
     public AdminHandler(SpaceService spaceService,
                         ReportService reportService,
                         UserManagementService userManagementService,
                         ImpersonationService impersonationService,
+                        PlatformSettingsService platformSettingsService,
                         RoleChecker roleChecker) {
         this.spaceService = spaceService;
         this.reportService = reportService;
         this.userManagementService = userManagementService;
         this.impersonationService = impersonationService;
+        this.platformSettingsService = platformSettingsService;
         this.roleChecker = roleChecker;
     }
 
@@ -106,6 +115,14 @@ public class AdminHandler {
         roleChecker.requireNotReadOnly();
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(reportService.initiateUpload(spaceId, request));
+    }
+
+    @GetMapping("/spaces/{spaceId}/reports/{reportId}")
+    public ResponseEntity<ReportViewResponse> getReport(
+            @PathVariable String spaceId,
+            @PathVariable String reportId) {
+        roleChecker.requireAdminWithSpaceAccess(spaceId);
+        return ResponseEntity.ok(reportService.getReport(spaceId, reportId));
     }
 
     @PostMapping("/spaces/{spaceId}/reports/{reportId}/assets")
@@ -183,6 +200,57 @@ public class AdminHandler {
         roleChecker.requireNotReadOnly();
         userManagementService.resetMfa(userId);
         return ResponseEntity.ok().build();
+    }
+
+    // Platform settings endpoints
+
+    @GetMapping("/settings")
+    public ResponseEntity<PlatformSettingsResponse> getSettings() {
+        roleChecker.requireAdmin();
+        PlatformSettingsEntity settings = platformSettingsService.getSettings();
+        return ResponseEntity.ok(toSettingsResponse(settings));
+    }
+
+    @PutMapping("/settings")
+    public ResponseEntity<PlatformSettingsResponse> updateSettings(
+            @Valid @RequestBody PlatformSettingsRequest request) {
+        roleChecker.requireSuperAdmin();
+        roleChecker.requireNotReadOnly();
+
+        SecurityContext.AuthenticatedUser currentUser = SecurityContext.getCurrentUser();
+        PlatformSettingsEntity settings = platformSettingsService.getSettings();
+
+        settings.setOrganizationName(request.organizationName());
+        settings.setOrganizationLegalEntity(request.organizationLegalEntity());
+        settings.setAllowedAdminDomains(request.allowedAdminDomains());
+        settings.setDomainValidationMode(request.domainValidationMode());
+        settings.setMaxReportFileSizeMb(request.maxReportFileSizeMb());
+        settings.setMaxFeedbackAttachmentSizeMb(request.maxFeedbackAttachmentSizeMb());
+        settings.setSignedCookieTtlHours(request.signedCookieTtlHours());
+        settings.setInvitationExpiryHours(request.invitationExpiryHours());
+        settings.setNotifyOnInvitationAccepted(request.notifyOnInvitationAccepted());
+        settings.setNotifyFeedbackByEmail(request.notifyFeedbackByEmail());
+        settings.setUpdatedBy(currentUser.email());
+
+        PlatformSettingsEntity saved = platformSettingsService.saveSettings(settings);
+        return ResponseEntity.ok(toSettingsResponse(saved));
+    }
+
+    private PlatformSettingsResponse toSettingsResponse(PlatformSettingsEntity e) {
+        return new PlatformSettingsResponse(
+                e.getOrganizationName(),
+                e.getOrganizationLegalEntity(),
+                e.getAllowedAdminDomains(),
+                e.getDomainValidationMode(),
+                e.getMaxReportFileSizeMb(),
+                e.getMaxFeedbackAttachmentSizeMb(),
+                e.getSignedCookieTtlHours(),
+                e.getInvitationExpiryHours(),
+                e.getNotifyOnInvitationAccepted(),
+                e.getNotifyFeedbackByEmail(),
+                e.getUpdatedAt(),
+                e.getUpdatedBy()
+        );
     }
 
     // Super admin only endpoints

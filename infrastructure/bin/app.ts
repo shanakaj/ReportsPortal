@@ -23,6 +23,7 @@ export interface EnvironmentConfig {
   invitationExpiryHours: number;
   superAdminEmail: string;
   logRetentionDays: number;
+  allowedAdminDomains?: string;
 }
 
 const app = new cdk.App();
@@ -102,6 +103,7 @@ const apiStack = new ApiStack(app, `${prefix}-Api`, {
   auditBucket: storageStack.auditBucket,
   encryptionKey: storageStack.encryptionKey,
   eventBus: eventsStack.eventBus,
+  platformSettingsTable: storageStack.platformSettingsTable,
   tags: commonTags,
   description: `Report Portal API Stack (${environmentName})`,
 });

@@ -19,11 +19,14 @@ public class EmailService {
     private static final Logger log = LoggerFactory.getLogger(EmailService.class);
 
     private final SesClient sesClient;
+    private final PlatformSettingsService platformSettingsService;
     private final String fromAddress;
 
     public EmailService(SesClient sesClient,
+                        PlatformSettingsService platformSettingsService,
                         @Value("${ses.from-address:noreply@reports.yourdomain.com}") String fromAddress) {
         this.sesClient = sesClient;
+        this.platformSettingsService = platformSettingsService;
         this.fromAddress = fromAddress;
     }
 
@@ -34,7 +37,8 @@ public class EmailService {
     }
 
     public void sendAdminInvitationEmail(String toEmail, String inviteLink) {
-        String subject = "You've been invited as an admin to the Report Portal";
+        String orgName = platformSettingsService.getSettings().getOrganizationName();
+        String subject = "You've been invited as an admin to " + orgName;
         String htmlBody = buildAdminInvitationTemplate(inviteLink);
         sendEmail(toEmail, subject, htmlBody);
     }
@@ -158,6 +162,13 @@ public class EmailService {
     }
 
     private String buildEmailWrapper(String title, String content) {
+        var settings = platformSettingsService.getSettings();
+        String orgName = settings.getOrganizationName() != null
+                ? settings.getOrganizationName() : "Report Portal";
+        String legalEntity = settings.getOrganizationLegalEntity() != null
+                && !settings.getOrganizationLegalEntity().isBlank()
+                ? settings.getOrganizationLegalEntity() : orgName;
+
         return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">" +
                 "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\"></head>" +
                 "<body style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;" +
@@ -165,12 +176,12 @@ public class EmailService {
                 "<div style=\"max-width:600px;margin:0 auto;background:#ffffff;border-radius:8px;" +
                 "overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);\">" +
                 "<div style=\"background:#1a1a2e;padding:24px;text-align:center;\">" +
-                "<h1 style=\"color:#ffffff;margin:0;font-size:20px;\">Versent Report Portal</h1></div>" +
+                "<h1 style=\"color:#ffffff;margin:0;font-size:20px;\">" + orgName + "</h1></div>" +
                 "<div style=\"padding:32px;\">" +
                 "<h2 style=\"margin:0 0 16px 0;color:#1a1a2e;\">" + title + "</h2>" +
                 content + "</div>" +
                 "<div style=\"background:#f5f5f5;padding:16px;text-align:center;font-size:12px;color:#666;\">" +
-                "<p style=\"margin:0;\">Versent Report Portal</p></div>" +
+                "<p style=\"margin:0;\">" + legalEntity + "</p></div>" +
                 "</div></body></html>";
     }
 

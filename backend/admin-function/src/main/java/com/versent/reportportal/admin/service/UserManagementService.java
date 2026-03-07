@@ -11,9 +11,11 @@ import com.versent.reportportal.shared.model.InvitationEntity;
 import com.versent.reportportal.shared.model.SpaceEntity;
 import com.versent.reportportal.shared.model.UserEntity;
 import com.versent.reportportal.shared.model.UserRole;
+import com.versent.reportportal.shared.model.PlatformSettingsEntity;
 import com.versent.reportportal.shared.security.SecurityContext;
 import com.versent.reportportal.shared.service.AuditService;
 import com.versent.reportportal.shared.service.EmailService;
+import com.versent.reportportal.shared.service.PlatformSettingsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -42,7 +44,6 @@ import java.util.UUID;
 public class UserManagementService {
 
     private static final Logger log = LoggerFactory.getLogger(UserManagementService.class);
-    private static final String VERSENT_DOMAIN = "@versent.com.au";
 
     private final DynamoDbTable<UserEntity> userTable;
     private final DynamoDbTable<InvitationEntity> invitationTable;
@@ -50,6 +51,7 @@ public class UserManagementService {
     private final EmailService emailService;
     private final AuditService auditService;
     private final SpaceService spaceService;
+    private final PlatformSettingsService platformSettingsService;
     private final String userPoolId;
     private final String portalBaseUrl;
 
@@ -58,6 +60,7 @@ public class UserManagementService {
                                  EmailService emailService,
                                  AuditService auditService,
                                  SpaceService spaceService,
+                                 PlatformSettingsService platformSettingsService,
                                  @Value("${dynamodb.tables.users:ReportPortal-Users}") String userTableName,
                                  @Value("${dynamodb.tables.invitations:ReportPortal-Invitations}") String invitationTableName,
                                  @Value("${cognito.user-pool-id}") String userPoolId,
@@ -70,6 +73,7 @@ public class UserManagementService {
         this.emailService = emailService;
         this.auditService = auditService;
         this.spaceService = spaceService;
+        this.platformSettingsService = platformSettingsService;
         this.userPoolId = userPoolId;
         this.portalBaseUrl = portalBaseUrl;
     }
@@ -77,19 +81,42 @@ public class UserManagementService {
     public void inviteCustomer(String spaceId, InviteUserRequest request) {
         SecurityContext.AuthenticatedUser currentUser = SecurityContext.getCurrentUser();
         SpaceEntity space = spaceService.getSpaceEntity(spaceId);
+        PlatformSettingsEntity settings = platformSettingsService.getSettings();
 
-        String emailDomain = request.email().substring(request.email().indexOf("@"));
-        boolean isDomainMismatch = !emailDomain.equals(VERSENT_DOMAIN) &&
-                !space.getSpaceName().contains(emailDomain.substring(1).split("\\.")[0]);
+        String emailDomain = request.email().substring(request.email().indexOf("@") + 1);
+        boolean isAdminDomain = settings.getAllowedAdminDomains().stream()
+                .anyMatch(d -> emailDomain.equalsIgnoreCase(d));
 
-        if (isDomainMismatch && !request.domainMismatchConfirmed()) {
-            throw new ValidationException(
-                    "Email domain does not match space name. Set domainMismatchConfirmed=true to proceed.");
+        boolean isDomainMismatch = false;
+        if (!isAdminDomain) {
+            // Check against space's allowed domains first, then fall back to space name matching
+            List<String> spaceDomains = space.getAllowedCustomerDomains();
+            if (spaceDomains != null && !spaceDomains.isEmpty()) {
+                isDomainMismatch = spaceDomains.stream()
+                        .noneMatch(d -> emailDomain.equalsIgnoreCase(d));
+            } else {
+                String emailDomainBase = emailDomain.split("\\.")[0].toLowerCase();
+                isDomainMismatch = !space.getSpaceName().toLowerCase().contains(emailDomainBase);
+            }
+        }
+
+        String validationMode = settings.getDomainValidationMode();
+        if (isDomainMismatch) {
+            if ("strict".equals(validationMode)) {
+                throw new ValidationException(
+                        "Email domain does not match space. Domain validation is set to strict mode.");
+            }
+            if ("warn".equals(validationMode) && !request.domainMismatchConfirmed()) {
+                throw new ValidationException(
+                        "Email domain does not match space name. Set domainMismatchConfirmed=true to proceed.");
+            }
         }
 
         String token = UUID.randomUUID().toString();
         Instant now = Instant.now();
-        long expiresAt = now.plusSeconds(24 * 60 * 60).getEpochSecond();
+        int expiryHours = settings.getInvitationExpiryHours() != null
+                ? settings.getInvitationExpiryHours() : 24;
+        long expiresAt = now.plusSeconds((long) expiryHours * 60 * 60).getEpochSecond();
 
         InvitationEntity invitation = new InvitationEntity();
         invitation.setPk(InvitationEntity.buildPk(token));
@@ -114,14 +141,22 @@ public class UserManagementService {
 
     public void inviteAdmin(InviteAdminRequest request) {
         SecurityContext.AuthenticatedUser currentUser = SecurityContext.getCurrentUser();
+        PlatformSettingsEntity settings = platformSettingsService.getSettings();
 
-        if (!request.email().endsWith(VERSENT_DOMAIN)) {
-            throw new ValidationException("Admin emails must be @versent.com.au");
+        List<String> allowedDomains = settings.getAllowedAdminDomains();
+        String emailDomain = request.email().substring(request.email().indexOf("@") + 1);
+        boolean domainAllowed = allowedDomains.stream()
+                .anyMatch(d -> emailDomain.equalsIgnoreCase(d));
+        if (!domainAllowed) {
+            throw new ValidationException("Admin emails must use one of: " +
+                    String.join(", ", allowedDomains.stream().map(d -> "@" + d).toList()));
         }
 
         String token = UUID.randomUUID().toString();
         Instant now = Instant.now();
-        long expiresAt = now.plusSeconds(24 * 60 * 60).getEpochSecond();
+        int expiryHours = settings.getInvitationExpiryHours() != null
+                ? settings.getInvitationExpiryHours() : 24;
+        long expiresAt = now.plusSeconds((long) expiryHours * 60 * 60).getEpochSecond();
 
         InvitationEntity invitation = new InvitationEntity();
         invitation.setPk(InvitationEntity.buildPk(token));

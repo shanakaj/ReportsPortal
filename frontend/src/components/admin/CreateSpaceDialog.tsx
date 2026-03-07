@@ -108,9 +108,9 @@ export function CreateSpaceDialog({ open, onOpenChange, onCreated }: CreateSpace
             <div className="flex items-start gap-2 rounded-md bg-blue-50 dark:bg-blue-950/30 p-3 text-xs text-blue-700 dark:text-blue-300">
               <Info className="h-4 w-4 mt-0.5 shrink-0" />
               <span>
-                Use a name that matches your customer&apos;s email domain (e.g., &quot;versent&quot;
-                for @versent.com.au, &quot;woodside&quot; for @woodside.com.au). This ensures
-                customers can be invited without triggering domain mismatch warnings.
+                Use a name that matches your customer&apos;s email domain base (e.g.,
+                &quot;acme&quot; for @acme.com). This helps with automatic domain matching when
+                inviting customers to the space.
               </span>
             </div>
           </div>

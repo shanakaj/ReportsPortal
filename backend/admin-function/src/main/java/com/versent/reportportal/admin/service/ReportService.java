@@ -1,6 +1,7 @@
 package com.versent.reportportal.admin.service;
 
 import com.versent.reportportal.admin.dto.ReportResponse;
+import com.versent.reportportal.admin.dto.ReportViewResponse;
 import com.versent.reportportal.admin.dto.UploadReportRequest;
 import com.versent.reportportal.admin.dto.UploadReportResponse;
 import com.versent.reportportal.shared.dto.CursorUtil;
@@ -11,6 +12,7 @@ import com.versent.reportportal.shared.model.ReportEntity;
 import com.versent.reportportal.shared.model.SpaceEntity;
 import com.versent.reportportal.shared.security.SecurityContext;
 import com.versent.reportportal.shared.service.AuditService;
+import com.versent.reportportal.shared.service.SignedCookieService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -47,19 +49,25 @@ public class ReportService {
     private final S3Presigner s3Presigner;
     private final SpaceService spaceService;
     private final AuditService auditService;
+    private final SignedCookieService signedCookieService;
+    private final String cloudFrontDomain;
 
     public ReportService(DynamoDbEnhancedClient dynamoDbEnhancedClient,
                          S3Client s3Client,
                          S3Presigner s3Presigner,
                          SpaceService spaceService,
                          AuditService auditService,
-                         @Value("${dynamodb.tables.reports:ReportPortal-Reports}") String tableName) {
+                         SignedCookieService signedCookieService,
+                         @Value("${dynamodb.tables.reports:ReportPortal-Reports}") String tableName,
+                         @Value("${cloudfront.domain:reports.yourdomain.com}") String cloudFrontDomain) {
         this.reportTable = dynamoDbEnhancedClient.table(tableName,
                 TableSchema.fromBean(ReportEntity.class));
         this.s3Client = s3Client;
         this.s3Presigner = s3Presigner;
         this.spaceService = spaceService;
         this.auditService = auditService;
+        this.signedCookieService = signedCookieService;
+        this.cloudFrontDomain = cloudFrontDomain;
     }
 
     public UploadReportResponse initiateUpload(String spaceId, UploadReportRequest request) {
@@ -171,8 +179,39 @@ public class ReportService {
                 "REPORT_DELETED", spaceId + "/" + reportId, "SUCCESS");
     }
 
-    public UploadReportResponse generateAssetUploadUrl(String spaceId, String reportId, String fileName, String contentType) {
-        SecurityContext.getCurrentUser(); // ensure authenticated
+    public ReportViewResponse getReport(String spaceId, String reportId) {
+        SecurityContext.AuthenticatedUser currentUser = SecurityContext.getCurrentUser();
+
+        ReportEntity report = reportTable.getItem(Key.builder()
+                .partitionValue(ReportEntity.buildPk(spaceId))
+                .sortValue(ReportEntity.buildSk(reportId))
+                .build());
+
+        if (report == null) {
+            throw new ResourceNotFoundException("Report not found: " + reportId);
+        }
+
+        SignedCookieService.SignedCookieResult cookieResult = signedCookieService.generateSignedCookies(spaceId);
+        String cloudFrontUrl = "https://" + cloudFrontDomain + "/reports/" + report.getS3Key();
+
+        auditService.logEvent(currentUser.userId(), currentUser.email(),
+                "REPORT_VIEWED", spaceId + "/" + reportId, "SUCCESS");
+
+        return new ReportViewResponse(
+                report.getReportId(),
+                report.getSpaceId(),
+                report.getFileName(),
+                cloudFrontUrl,
+                cookieResult.cookies(),
+                cookieResult.expiresAt(),
+                report.getUploadedAt(),
+                report.getFileSize()
+        );
+    }
+
+    public UploadReportResponse generateAssetUploadUrl(String spaceId, String reportId,
+                                                        String fileName, String contentType) {
+        SecurityContext.getCurrentUser();
 
         ReportEntity report = reportTable.getItem(Key.builder()
                 .partitionValue(ReportEntity.buildPk(spaceId))

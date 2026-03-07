@@ -4,35 +4,37 @@ import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import software.amazon.awssdk.enhanced.dynamodb.DynamoDbEnhancedClient;
-import software.amazon.awssdk.enhanced.dynamodb.DynamoDbTable;
-import software.amazon.awssdk.enhanced.dynamodb.Key;
-import software.amazon.awssdk.enhanced.dynamodb.TableSchema;
-import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbAttribute;
-import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbBean;
-import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbPartitionKey;
-import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbSortKey;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.GetItemResponse;
 import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
 
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 public class PreSignupHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
 
     private static final Logger log = LoggerFactory.getLogger(PreSignupHandler.class);
-    private static final String VERSENT_DOMAIN = "@versent.com.au";
 
     private final DynamoDbClient dynamoDbClient;
     private final String invitationsTable;
     private final String auditLogTable;
+    private final String platformSettingsTable;
+    private final String fallbackAdminDomain;
+
+    // Cached allowed admin domains (refreshed on cold start)
+    private volatile List<String> cachedAdminDomains;
+    private volatile long cacheTimestamp;
+    private static final long CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
     public PreSignupHandler() {
         String region = System.getenv("AWS_REGION") != null
@@ -47,6 +49,47 @@ public class PreSignupHandler implements RequestHandler<Map<String, Object>, Map
 
         this.auditLogTable = System.getenv("AUDIT_LOG_TABLE") != null
                 ? System.getenv("AUDIT_LOG_TABLE") : "ReportPortal-AuditLog";
+
+        this.platformSettingsTable = System.getenv("PLATFORM_SETTINGS_TABLE") != null
+                ? System.getenv("PLATFORM_SETTINGS_TABLE") : "ReportPortal-PlatformSettings";
+
+        this.fallbackAdminDomain = System.getenv("ALLOWED_ADMIN_DOMAIN") != null
+                ? System.getenv("ALLOWED_ADMIN_DOMAIN") : "versent.com.au";
+    }
+
+    private List<String> getAllowedAdminDomains() {
+        if (cachedAdminDomains != null && System.currentTimeMillis() - cacheTimestamp < CACHE_TTL_MS) {
+            return cachedAdminDomains;
+        }
+
+        try {
+            Map<String, AttributeValue> key = new HashMap<>();
+            key.put("PK", AttributeValue.builder().s("SETTINGS").build());
+            key.put("SK", AttributeValue.builder().s("GLOBAL").build());
+
+            GetItemResponse result = dynamoDbClient.getItem(GetItemRequest.builder()
+                    .tableName(platformSettingsTable)
+                    .key(key)
+                    .build());
+
+            if (result.hasItem() && result.item().containsKey("allowedAdminDomains")) {
+                List<String> domains = result.item().get("allowedAdminDomains").l().stream()
+                        .map(AttributeValue::s)
+                        .toList();
+                if (!domains.isEmpty()) {
+                    cachedAdminDomains = domains;
+                    cacheTimestamp = System.currentTimeMillis();
+                    return domains;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to read platform settings, falling back to env var: {}", e.getMessage());
+        }
+
+        // Fallback to environment variable
+        cachedAdminDomains = List.of(fallbackAdminDomain);
+        cacheTimestamp = System.currentTimeMillis();
+        return cachedAdminDomains;
     }
 
     @Override
@@ -74,10 +117,16 @@ public class PreSignupHandler implements RequestHandler<Map<String, Object>, Map
 
             // Validate admin/super_admin email domain
             if ("admin".equalsIgnoreCase(role) || "super_admin".equalsIgnoreCase(role)) {
-                if (!email.endsWith(VERSENT_DOMAIN)) {
+                List<String> allowedDomains = getAllowedAdminDomains();
+                String emailDomain = email.substring(email.indexOf("@") + 1).toLowerCase();
+                boolean domainAllowed = allowedDomains.stream()
+                        .anyMatch(d -> emailDomain.equalsIgnoreCase(d));
+
+                if (!domainAllowed) {
+                    String domainsStr = String.join(", ", allowedDomains.stream().map(d -> "@" + d).toList());
                     logAuditEvent(email, "SIGNUP_REJECTED",
-                            "Non-versent.com.au email for " + role + " role", "FAILURE");
-                    throw new RuntimeException("Admin and super admin accounts must use @versent.com.au email addresses");
+                            "Email domain not in allowed admin domains for " + role + " role", "FAILURE");
+                    throw new RuntimeException("Admin and super admin accounts must use: " + domainsStr);
                 }
             }
 

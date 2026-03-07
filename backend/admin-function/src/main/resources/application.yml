@@ -22,6 +22,7 @@ dynamodb:
     invitations: ${INVITATIONS_TABLE:ReportPortal-Invitations}
     audit-log: ${AUDIT_LOG_TABLE:ReportPortal-AuditLog}
     notifications: ${NOTIFICATIONS_TABLE:ReportPortal-Notifications}
+    platform-settings: ${PLATFORM_SETTINGS_TABLE:ReportPortal-PlatformSettings}
 
 ses:
   from-address: ${SES_FROM_ADDRESS:noreply@reports.yourdomain.com}

@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, MessageSquare, X } from 'lucide-react';
+import { ArrowLeft, MessageSquare, X, Download } from 'lucide-react';
 import { getReport } from '@/services/reports';
 import { Button } from '@/components/ui/button';
 import { FeedbackPanel } from '@/components/feedback/FeedbackPanel';
@@ -9,6 +9,7 @@ import { SessionExpiredOverlay } from '@/components/common/SessionExpiredOverlay
 import { useAnalyticsBridge } from '@/hooks/useAnalyticsBridge';
 import { useAuth } from '@/hooks/useAuth';
 import { Role } from '@/types';
+import { getFileTypeCategory, isDownloadable } from '@/lib/file-utils';
 
 export function FullTabReportPage() {
   const { spaceId, reportId } = useParams<{ spaceId: string; reportId: string }>();
@@ -34,9 +35,10 @@ export function FullTabReportPage() {
     enabled: !!data && user?.analyticsConsent === true,
   });
 
-  // Monitor for session expiry
+  // Monitor for session expiry — only for HTML reports
   useEffect(() => {
     if (!data) return;
+    if (getFileTypeCategory(data.report.fileName) !== 'html') return;
 
     const checkExpiry = () => {
       try {
@@ -80,19 +82,56 @@ export function FullTabReportPage() {
   }
 
   const portalPath = isAdmin ? '/admin' : '/customer';
+  const category = getFileTypeCategory(data.report.fileName);
+
+  const renderContent = () => {
+    if (category === 'image') {
+      return (
+        <div className="h-full w-full overflow-auto bg-muted/30 flex items-center justify-center p-4">
+          <img
+            src={data.cloudFrontUrl}
+            alt={data.report.fileName}
+            className="max-w-full max-h-full object-contain"
+          />
+        </div>
+      );
+    }
+
+    if (category === 'html' || category === 'pdf') {
+      return (
+        <iframe
+          ref={iframeRef}
+          src={data.cloudFrontUrl}
+          className="h-full w-full border-none"
+          sandbox={category === 'html' ? 'allow-scripts allow-same-origin' : undefined}
+          title={data.report.fileName}
+        />
+      );
+    }
+
+    // Doc, Excel, PPT — not viewable in browser
+    return (
+      <div className="h-full w-full flex flex-col items-center justify-center gap-4 bg-muted/30">
+        <p className="text-muted-foreground">
+          This file type cannot be previewed in the browser.
+        </p>
+        <Button
+          variant="default"
+          size="lg"
+          onClick={() => window.open(data.cloudFrontUrl, '_blank')}
+        >
+          <Download className="mr-2 h-4 w-4" />
+          Download {data.report.fileName}
+        </Button>
+      </div>
+    );
+  };
 
   return (
     <div className="relative h-screen w-screen">
       {sessionExpired && <SessionExpiredOverlay />}
 
-      {/* Report iframe - full viewport */}
-      <iframe
-        ref={iframeRef}
-        src={data.cloudFrontUrl}
-        className="h-full w-full border-none"
-        sandbox="allow-scripts allow-same-origin"
-        title={data.report.fileName}
-      />
+      {renderContent()}
 
       {/* Floating toolbar */}
       <div className="fixed top-4 left-4 z-40 flex items-center gap-2 rounded-lg bg-card/95 backdrop-blur border px-4 py-2 shadow-lg">
@@ -108,6 +147,16 @@ export function FullTabReportPage() {
           <ArrowLeft className="mr-1 h-3 w-3" />
           Portal
         </Button>
+        {isDownloadable(data.report.fileName) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => window.open(data.cloudFrontUrl, '_blank')}
+          >
+            <Download className="mr-1 h-3 w-3" />
+            Download
+          </Button>
+        )}
         <Button
           variant={showFeedback ? 'default' : 'ghost'}
           size="sm"

@@ -51,7 +51,11 @@ export const selectors = {
     analyticsLink: '[data-testid="nav-analytics"], a:has-text("Analytics")',
     auditLogLink: '[data-testid="nav-audit-log"], [data-testid="nav-audit"], a:has-text("Audit Log"), a:has-text("Audit")',
     feedbackLink: '[data-testid="nav-feedback"], a:has-text("Feedback")',
+    settingsLink: '[data-testid="nav-settings"], a:has-text("Settings")',
     notificationBell: '[data-testid="notification-bell"], [data-testid="notifications"], button[aria-label*="notification"], [aria-label*="Notification"]',
+    notificationsButton: '[data-testid="notification-bell"], [data-testid="notifications"], button[aria-label*="notification"], [aria-label*="Notification"]',
+    auditLink: '[data-testid="nav-audit-log"], [data-testid="nav-audit"], a:has-text("Audit Log"), a:has-text("Audit")',
+    profileButton: '[data-testid="user-menu"], [data-testid="nav-profile"], button:has-text("Profile")',
     notificationBadge: '[data-testid="notification-badge"]',
     userMenu: '[data-testid="user-menu"], [data-testid="nav-profile"], button:has-text("Profile")',
     logoutButton: '[data-testid="logout"], button:has-text("Logout"), button:has-text("Sign Out")',
@@ -235,6 +239,40 @@ export const selectors = {
     item: '[data-testid="notification-item"]',
     markAllRead: 'button:has-text("Mark all"), button:has-text("Read all")',
     emptyState: '[data-testid="no-notifications"]',
+  },
+
+  // ─── Platform Settings ───────────────────────────────────────────────
+  settings: {
+    container: '[data-testid="settings-page"], main:has(h2:has-text("Platform Settings"))',
+    viewOnlyBadge: '[data-testid="settings-view-only"], :has-text("View Only")',
+    // Organization section
+    orgNameInput: '#organizationName, [data-testid="org-name-input"]',
+    orgLegalEntityInput: '#organizationLegalEntity, [data-testid="org-legal-entity-input"]',
+    // Admin domains section
+    domainBadge: '[data-testid="admin-domain-badge"], .gap-1.px-3',
+    domainInput: '[data-testid="admin-domain-input"], input[placeholder*="domain" i]',
+    addDomainButton: '[data-testid="add-domain"], button:has-text("Add")',
+    removeDomainButton: '[data-testid="remove-domain"]',
+    // Domain validation mode
+    validationModeSelect: '[data-testid="validation-mode-select"], button[role="combobox"]',
+    validationModeOff: '[data-testid="validation-off"], [role="option"]:has-text("Off")',
+    validationModeWarn: '[data-testid="validation-warn"], [role="option"]:has-text("Warn")',
+    validationModeStrict: '[data-testid="validation-strict"], [role="option"]:has-text("Strict")',
+    // Upload limits
+    maxReportSizeInput: '#maxReportFileSizeMb, [data-testid="max-report-size"]',
+    maxAttachmentSizeInput: '#maxFeedbackAttachmentSizeMb, [data-testid="max-attachment-size"]',
+    // Security
+    cookieTtlInput: '#signedCookieTtlHours, [data-testid="cookie-ttl"]',
+    invitationExpiryInput: '#invitationExpiryHours, [data-testid="invitation-expiry"]',
+    // Notifications
+    notifyInvitationSwitch: '[data-testid="notify-invitation-switch"], button[role="switch"]:near(:has-text("invitation"))',
+    notifyFeedbackSwitch: '[data-testid="notify-feedback-switch"], button[role="switch"]:near(:has-text("feedback"))',
+    // Save
+    saveButton: '[data-testid="save-settings"], button:has-text("Save Settings")',
+    saveSuccess: '[data-testid="save-success"], :has-text("Settings saved successfully")',
+    saveError: '[data-testid="save-error"], .text-destructive',
+    // Metadata
+    lastUpdated: '[data-testid="settings-last-updated"]',
   },
 
   // ─── Common / Shared ─────────────────────────────────────────────────

@@ -333,4 +333,47 @@ test.describe('Admin Journey', () => {
       }
     });
   });
+
+  test.describe('Platform Settings (View Only)', () => {
+    test('should show settings link in sidebar', async ({ adminPage: page }) => {
+      await page.goto(BASE_URL);
+      await expect(page.locator(selectors.nav.settingsLink)).toBeVisible({ timeout: 10_000 });
+    });
+
+    test('should navigate to settings and see View Only badge', async ({ adminPage: page }) => {
+      await page.goto(BASE_URL);
+      await page.locator(selectors.nav.settingsLink).click();
+      await expect(page.locator(selectors.settings.container)).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText('View Only')).toBeVisible({ timeout: 5_000 });
+    });
+
+    test('should have disabled inputs (admin cannot edit)', async ({ adminPage: page }) => {
+      await page.goto(`${BASE_URL}/admin/settings`);
+      await expect(page.locator(selectors.settings.container)).toBeVisible({ timeout: 10_000 });
+
+      await expect(page.locator(selectors.settings.orgNameInput)).toBeDisabled();
+      await expect(page.locator(selectors.settings.maxReportSizeInput)).toBeDisabled();
+      await expect(page.locator(selectors.settings.cookieTtlInput)).toBeDisabled();
+    });
+
+    test('should NOT show Save Settings button', async ({ adminPage: page }) => {
+      await page.goto(`${BASE_URL}/admin/settings`);
+      await expect(page.locator(selectors.settings.container)).toBeVisible({ timeout: 10_000 });
+
+      const saveButton = page.locator(selectors.settings.saveButton);
+      const isVisible = await saveButton.isVisible({ timeout: 2_000 }).catch(() => false);
+      expect(isVisible).toBeFalsy();
+    });
+
+    test('should have disabled notification switches', async ({ adminPage: page }) => {
+      await page.goto(`${BASE_URL}/admin/settings`);
+      await expect(page.locator(selectors.settings.container)).toBeVisible({ timeout: 10_000 });
+
+      const switches = page.locator('button[role="switch"]');
+      const count = await switches.count();
+      for (let i = 0; i < count; i++) {
+        await expect(switches.nth(i)).toBeDisabled();
+      }
+    });
+  });
 });

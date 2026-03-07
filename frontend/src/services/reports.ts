@@ -1,6 +1,7 @@
 import api from '@/services/api';
 import axios from 'axios';
 import type { Report, PaginatedResponse, ReportViewData } from '@/types';
+import { getMimeType } from '@/lib/file-utils';
 
 export async function listReports(
   spaceId: string,
@@ -37,7 +38,7 @@ export async function uploadReportFile(
 ): Promise<void> {
   await axios.put(uploadUrl, file, {
     headers: {
-      'Content-Type': file.type || 'text/html',
+      'Content-Type': file.type || getMimeType(file.name),
     },
     onUploadProgress: (event) => {
       if (event.total && onProgress) {

@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect } from 'react';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, Download } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { getReport } from '@/services/reports';
 import { Button } from '@/components/ui/button';
@@ -7,6 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { SessionExpiredOverlay } from '@/components/common/SessionExpiredOverlay';
 import { useAnalyticsBridge } from '@/hooks/useAnalyticsBridge';
 import { useAuth } from '@/hooks/useAuth';
+import { getFileTypeCategory, isViewableInline, isDownloadable } from '@/lib/file-utils';
 
 interface ReportViewerProps {
   spaceId: string;
@@ -32,9 +33,11 @@ export function ReportViewer({ spaceId, reportId, isAdmin = false }: ReportViewe
     enabled: !!data && user?.analyticsConsent === true,
   });
 
-  // Monitor iframe for 403 (session expiry)
+  // Monitor iframe for 403 (session expiry) — only for iframe-based views
   useEffect(() => {
     if (!data) return;
+    const category = getFileTypeCategory(data.report.fileName);
+    if (category !== 'html') return;
 
     const checkIframe = () => {
       try {
@@ -70,6 +73,51 @@ export function ReportViewer({ spaceId, reportId, isAdmin = false }: ReportViewe
 
   if (!data) return null;
 
+  const category = getFileTypeCategory(data.report.fileName);
+  const canViewInline = isViewableInline(data.report.fileName);
+
+  const renderContent = () => {
+    if (category === 'image') {
+      return (
+        <div className="h-full w-full overflow-auto rounded-md border bg-muted/30 flex items-center justify-center p-4">
+          <img
+            src={data.cloudFrontUrl}
+            alt={data.report.fileName}
+            className="max-w-full max-h-full object-contain"
+          />
+        </div>
+      );
+    }
+
+    if (category === 'html' || category === 'pdf') {
+      return (
+        <iframe
+          ref={iframeRef}
+          src={data.cloudFrontUrl}
+          className="h-full w-full rounded-md border"
+          sandbox={category === 'html' ? 'allow-scripts allow-same-origin' : undefined}
+          title={data.report.fileName}
+        />
+      );
+    }
+
+    // Doc, Excel, PPT — not viewable inline
+    return (
+      <div className="h-full w-full rounded-md border flex flex-col items-center justify-center gap-4 bg-muted/30">
+        <p className="text-sm text-muted-foreground">
+          This file type cannot be previewed in the browser.
+        </p>
+        <Button
+          variant="default"
+          onClick={() => window.open(data.cloudFrontUrl, '_blank')}
+        >
+          <Download className="mr-2 h-4 w-4" />
+          Download {data.report.fileName}
+        </Button>
+      </div>
+    );
+  };
+
   return (
     <div className="relative h-[calc(100vh-200px)]">
       {sessionExpired && <SessionExpiredOverlay />}
@@ -78,23 +126,31 @@ export function ReportViewer({ spaceId, reportId, isAdmin = false }: ReportViewe
         <h3 className="text-sm font-medium text-muted-foreground">
           {data.report.fileName}
         </h3>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => window.open(`/report/${spaceId}/${reportId}`, '_blank')}
-        >
-          <ExternalLink className="mr-1 h-3 w-3" />
-          Open Full Tab
-        </Button>
+        <div className="flex items-center gap-2">
+          {canViewInline && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.open(`/report/${spaceId}/${reportId}`, '_blank')}
+            >
+              <ExternalLink className="mr-1 h-3 w-3" />
+              Open Full Tab
+            </Button>
+          )}
+          {isDownloadable(data.report.fileName) && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.open(data.cloudFrontUrl, '_blank')}
+            >
+              <Download className="mr-1 h-3 w-3" />
+              Download
+            </Button>
+          )}
+        </div>
       </div>
 
-      <iframe
-        ref={iframeRef}
-        src={data.cloudFrontUrl}
-        className="h-full w-full rounded-md border"
-        sandbox="allow-scripts allow-same-origin"
-        title={data.report.fileName}
-      />
+      {renderContent()}
     </div>
   );
 }

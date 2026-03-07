@@ -25,6 +25,11 @@ test.describe('Super Admin Journey', () => {
       await expect(page.locator(selectors.nav.auditLink)).toBeVisible({ timeout: 10_000 });
     });
 
+    test('should show settings link in sidebar', async ({ superAdminPage: page }) => {
+      await page.goto(BASE_URL);
+      await expect(page.locator(selectors.nav.settingsLink)).toBeVisible({ timeout: 10_000 });
+    });
+
     test('should show notification bell', async ({ superAdminPage: page }) => {
       await page.goto(BASE_URL);
       await expect(page.locator(selectors.nav.notificationsButton)).toBeVisible({ timeout: 10_000 });
@@ -540,6 +545,49 @@ test.describe('Super Admin Journey', () => {
       const warning = dialog.locator(selectors.inviteUser.domainWarning);
       if (await warning.isVisible({ timeout: 3_000 }).catch(() => false)) {
         await expect(warning).toBeVisible();
+      }
+    });
+  });
+
+  test.describe('Platform Settings', () => {
+    test('should navigate to settings page and see all sections', async ({ superAdminPage: page }) => {
+      await page.goto(BASE_URL);
+      await page.locator(selectors.nav.settingsLink).click();
+      await expect(page.locator(selectors.settings.container)).toBeVisible({ timeout: 10_000 });
+
+      await expect(page.getByText('Organization')).toBeVisible();
+      await expect(page.getByText('Admin Domain Restriction')).toBeVisible();
+      await expect(page.getByText('Upload Limits')).toBeVisible();
+      await expect(page.getByText('Security')).toBeVisible();
+      await expect(page.getByText('Notifications')).toBeVisible();
+    });
+
+    test('should have editable inputs (super admin has full access)', async ({ superAdminPage: page }) => {
+      await page.goto(`${BASE_URL}/admin/settings`);
+      await expect(page.locator(selectors.settings.container)).toBeVisible({ timeout: 10_000 });
+
+      await expect(page.locator(selectors.settings.orgNameInput)).toBeEnabled();
+      await expect(page.locator(selectors.settings.maxReportSizeInput)).toBeEnabled();
+      await expect(page.locator(selectors.settings.cookieTtlInput)).toBeEnabled();
+    });
+
+    test('should show Save Settings button', async ({ superAdminPage: page }) => {
+      await page.goto(`${BASE_URL}/admin/settings`);
+      await expect(page.locator(selectors.settings.container)).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator(selectors.settings.saveButton)).toBeVisible();
+    });
+
+    test('should show notification toggle switches', async ({ superAdminPage: page }) => {
+      await page.goto(`${BASE_URL}/admin/settings`);
+      await expect(page.locator(selectors.settings.container)).toBeVisible({ timeout: 10_000 });
+
+      const switches = page.locator('button[role="switch"]');
+      const count = await switches.count();
+      expect(count).toBeGreaterThanOrEqual(2);
+
+      // Switches should be enabled for super admin
+      for (let i = 0; i < count; i++) {
+        await expect(switches.nth(i)).toBeEnabled();
       }
     });
   });
