@@ -9,7 +9,7 @@ import { SessionExpiredOverlay } from '@/components/common/SessionExpiredOverlay
 import { useAnalyticsBridge } from '@/hooks/useAnalyticsBridge';
 import { useAuth } from '@/hooks/useAuth';
 import { Role } from '@/types';
-import { getFileTypeCategory } from '@/lib/file-utils';
+import { getFileTypeCategory, isDownloadable } from '@/lib/file-utils';
 
 export function FullTabReportPage() {
   const { spaceId, reportId } = useParams<{ spaceId: string; reportId: string }>();
@@ -147,6 +147,16 @@ export function FullTabReportPage() {
           <ArrowLeft className="mr-1 h-3 w-3" />
           Portal
         </Button>
+        {isDownloadable(data.report.fileName) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => window.open(data.cloudFrontUrl, '_blank')}
+          >
+            <Download className="mr-1 h-3 w-3" />
+            Download
+          </Button>
+        )}
         <Button
           variant={showFeedback ? 'default' : 'ghost'}
           size="sm"

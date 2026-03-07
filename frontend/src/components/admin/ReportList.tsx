@@ -9,7 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { useAuth } from '@/hooks/useAuth';
 import { formatDistanceToNow } from 'date-fns';
-import { getFileTypeCategory, isViewableInline } from '@/lib/file-utils';
+import { getFileTypeCategory, isViewableInline, isDownloadable } from '@/lib/file-utils';
 import type { Report } from '@/types';
 
 function ReportFileIcon({ fileName }: { fileName: string }) {
@@ -110,29 +110,37 @@ export function ReportList({ spaceId }: ReportListProps) {
                 <TableCell>
                   <div className="flex items-center gap-1">
                     {viewable && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() =>
+                            navigate(`/admin/spaces/${spaceId}/reports/${report.reportId}`)
+                          }
+                          title="View embedded"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleOpenReport(report)}
+                          title="Open in new tab"
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                        </Button>
+                      </>
+                    )}
+                    {isDownloadable(report.fileName) && (
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() =>
-                          navigate(`/admin/spaces/${spaceId}/reports/${report.reportId}`)
-                        }
-                        title="View embedded"
+                        onClick={() => window.open(report.cloudFrontUrl, '_blank')}
+                        title="Download"
                       >
-                        <Eye className="h-4 w-4" />
+                        <Download className="h-4 w-4" />
                       </Button>
                     )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleOpenReport(report)}
-                      title={viewable ? 'Open in new tab' : 'Download'}
-                    >
-                      {viewable ? (
-                        <ExternalLink className="h-4 w-4" />
-                      ) : (
-                        <Download className="h-4 w-4" />
-                      )}
-                    </Button>
                     {!isReadOnly && (
                       <Button
                         variant="ghost"

@@ -6,7 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDistanceToNow } from 'date-fns';
-import { getFileTypeCategory, isViewableInline } from '@/lib/file-utils';
+import { getFileTypeCategory, isViewableInline, isDownloadable } from '@/lib/file-utils';
 
 function ReportFileIcon({ fileName }: { fileName: string }) {
   const cat = getFileTypeCategory(fileName);
@@ -88,37 +88,36 @@ export function ReportBrowser({ spaceId }: ReportBrowserProps) {
               </div>
               <div className="flex items-center gap-2">
                 {viewable && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      navigate(`/customer/spaces/${spaceId}/reports/${report.reportId}`)
-                    }
-                  >
-                    View
-                  </Button>
-                )}
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={() =>
-                    viewable
-                      ? window.open(`/report/${spaceId}/${report.reportId}`, '_blank')
-                      : window.open(report.cloudFrontUrl, '_blank')
-                  }
-                >
-                  {viewable ? (
-                    <>
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        navigate(`/customer/spaces/${spaceId}/reports/${report.reportId}`)
+                      }
+                    >
+                      View
+                    </Button>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={() => window.open(`/report/${spaceId}/${report.reportId}`, '_blank')}
+                    >
                       <ExternalLink className="mr-1 h-3 w-3" />
                       Full Tab
-                    </>
-                  ) : (
-                    <>
-                      <Download className="mr-1 h-3 w-3" />
-                      Download
-                    </>
-                  )}
-                </Button>
+                    </Button>
+                  </>
+                )}
+                {isDownloadable(report.fileName) && (
+                  <Button
+                    variant={viewable ? 'outline' : 'default'}
+                    size="sm"
+                    onClick={() => window.open(report.cloudFrontUrl, '_blank')}
+                  >
+                    <Download className="mr-1 h-3 w-3" />
+                    Download
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>

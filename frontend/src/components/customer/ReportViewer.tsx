@@ -7,7 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { SessionExpiredOverlay } from '@/components/common/SessionExpiredOverlay';
 import { useAnalyticsBridge } from '@/hooks/useAnalyticsBridge';
 import { useAuth } from '@/hooks/useAuth';
-import { getFileTypeCategory, isViewableInline } from '@/lib/file-utils';
+import { getFileTypeCategory, isViewableInline, isDownloadable } from '@/lib/file-utils';
 
 interface ReportViewerProps {
   spaceId: string;
@@ -126,19 +126,28 @@ export function ReportViewer({ spaceId, reportId, isAdmin = false }: ReportViewe
         <h3 className="text-sm font-medium text-muted-foreground">
           {data.report.fileName}
         </h3>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => window.open(
-            canViewInline
-              ? `/report/${spaceId}/${reportId}`
-              : data.cloudFrontUrl,
-            '_blank',
+        <div className="flex items-center gap-2">
+          {canViewInline && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.open(`/report/${spaceId}/${reportId}`, '_blank')}
+            >
+              <ExternalLink className="mr-1 h-3 w-3" />
+              Open Full Tab
+            </Button>
           )}
-        >
-          <ExternalLink className="mr-1 h-3 w-3" />
-          {canViewInline ? 'Open Full Tab' : 'Download'}
-        </Button>
+          {isDownloadable(data.report.fileName) && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.open(data.cloudFrontUrl, '_blank')}
+            >
+              <Download className="mr-1 h-3 w-3" />
+              Download
+            </Button>
+          )}
+        </div>
       </div>
 
       {renderContent()}

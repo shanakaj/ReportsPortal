@@ -68,3 +68,9 @@ export function isViewableInNewTab(fileName: string): boolean {
   const cat = getFileTypeCategory(fileName);
   return cat === 'html' || cat === 'pdf' || cat === 'image';
 }
+
+/** Whether a download option should be shown (everything except HTML) */
+export function isDownloadable(fileName: string): boolean {
+  const cat = getFileTypeCategory(fileName);
+  return cat !== 'html';
+}
