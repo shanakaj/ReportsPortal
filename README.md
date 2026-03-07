@@ -54,6 +54,232 @@ Report Portal provides a dedicated, secure channel where:
    --> Admin receives email notification, replies in threaded conversation
 ```
 
+### User Journeys
+
+These journeys define the end-to-end flows for each role. They serve as both business documentation and the basis for E2E (Playwright) test scenarios.
+
+#### Journey 1: Super Admin
+
+The Super Admin has full control over the platform, including creating customer spaces, inviting admins and customers, uploading reports, viewing analytics, and impersonating customers for support.
+
+```mermaid
+journey
+    title Super Admin Journey
+    section Authentication
+      Login with credentials: 5: Super Admin
+      Complete MFA challenge: 5: Super Admin
+    section Dashboard
+      View dashboard overview: 5: Super Admin
+    section Space Management
+      Create customer space: 5: Super Admin
+      Invite admin (versent.com.au only): 5: Super Admin
+      Invite customer to space: 5: Super Admin
+    section Report Management
+      Upload reports to space: 5: Super Admin
+      View report (embedded iframe): 5: Super Admin
+      View report (full-tab mode): 5: Super Admin
+    section Monitoring
+      View analytics dashboard: 5: Super Admin
+      View audit log: 5: Super Admin
+    section Impersonation
+      Impersonate customer (read-only): 3: Super Admin
+      Browse as customer: 3: Super Admin
+      Exit impersonation: 5: Super Admin
+```
+
+**E2E Test Scenarios:**
+
+| # | Scenario | Steps | Expected Result |
+|---|----------|-------|-----------------|
+| SA-1 | Login with MFA | Enter credentials -> Enter TOTP code | Redirected to admin dashboard |
+| SA-2 | Create customer space | Spaces -> Create Space -> Enter name (e.g. "acme-corp") -> Submit | Space appears in list, S3 bucket provisioned |
+| SA-3 | Invite admin | Users -> Invite Admin -> Enter @versent.com.au email -> Submit | Invitation email sent, user appears as PENDING |
+| SA-4 | Invite customer to space | Spaces -> Select space -> Invite Customer -> Enter email -> Submit | Invitation email sent, user linked to space |
+| SA-5 | Upload report | Spaces -> Select space -> Reports -> Upload -> Select HTML file | Report appears in list with metadata |
+| SA-6 | View report | Reports -> Click report -> View in iframe | Report renders in sandboxed iframe |
+| SA-7 | View analytics | Analytics -> Select space | Charts show report views, active users |
+| SA-8 | View audit log | Audit Log -> Filter by date/action | Paginated log entries displayed |
+| SA-9 | Impersonate customer | Users -> Select customer -> Impersonate | Read-only banner shown, browsing as customer |
+| SA-10 | Exit impersonation | Click "Exit Impersonation" | Returned to admin view |
+| SA-11 | Disable/enable user | Users -> Select user -> Disable -> Confirm | User status toggled, cannot/can login |
+| SA-12 | Reset user MFA | Users -> Select user -> Reset MFA | User prompted to re-enroll MFA on next login |
+| SA-13 | Delete user | Users -> Select user -> Delete -> Confirm | User removed from system |
+
+#### Journey 2: Admin
+
+Admins manage their assigned customer spaces, upload reports, invite customers, handle feedback, and review scoped analytics.
+
+```mermaid
+journey
+    title Admin Journey
+    section Authentication
+      Login with credentials: 5: Admin
+      Complete MFA challenge: 5: Admin
+    section Space Management
+      View assigned spaces: 5: Admin
+      Upload report to space: 5: Admin
+      Invite customer (domain mismatch warning): 4: Admin
+    section User Management
+      Disable user: 4: Admin
+      Enable user: 4: Admin
+      Reset user MFA: 4: Admin
+    section Feedback
+      View feedback threads: 5: Admin
+      Reply to customer feedback: 5: Admin
+    section Monitoring
+      View space analytics: 5: Admin
+      View audit log (assigned spaces): 5: Admin
+```
+
+**E2E Test Scenarios:**
+
+| # | Scenario | Steps | Expected Result |
+|---|----------|-------|-----------------|
+| AD-1 | Login with MFA | Enter credentials -> Enter TOTP code | Redirected to admin dashboard |
+| AD-2 | View assigned spaces only | Navigate to Spaces | Only assigned spaces visible (not all) |
+| AD-3 | Upload report to space | Select space -> Reports -> Upload HTML | Report uploaded, appears in list |
+| AD-4 | Invite customer | Select space -> Invite Customer -> Enter email | Invitation sent; domain mismatch warning if email doesn't match space name |
+| AD-5 | View feedback inbox | Feedback tab -> View threads | Threaded conversations listed with status |
+| AD-6 | Reply to feedback | Select thread -> Type reply -> Submit | Reply saved, customer notified via email |
+| AD-7 | Disable user | Users -> Select customer -> Disable | User cannot log in |
+| AD-8 | Reset user MFA | Users -> Select customer -> Reset MFA | User must re-enroll TOTP on next login |
+| AD-9 | Cannot access unassigned space | Attempt to navigate to unassigned space URL | 403 Forbidden or redirect |
+| AD-10 | Cannot invite admins | No "Invite Admin" button visible | Button hidden for non-super-admin role |
+
+#### Journey 3: Customer
+
+Customers are invited by an Admin or Super Admin, complete registration with MFA setup, then browse reports and submit feedback.
+
+```mermaid
+journey
+    title Customer Journey
+    section Onboarding
+      Receive invitation email: 5: Customer
+      Accept invitation link: 5: Customer
+      Register (name, phone, company, password): 4: Customer
+      Setup MFA (TOTP): 4: Customer
+    section Authentication
+      First login with new credentials: 5: Customer
+    section Report Viewing
+      Browse assigned spaces: 5: Customer
+      Open report (full-tab default): 5: Customer
+      Navigate report tabs: 5: Customer
+    section Feedback
+      Submit feedback with attachment: 4: Customer
+      Receive reply notification: 5: Customer
+      View resolved feedback: 5: Customer
+```
+
+**E2E Test Scenarios:**
+
+| # | Scenario | Steps | Expected Result |
+|---|----------|-------|-----------------|
+| CU-1 | Accept invitation | Click invitation link in email | Registration form displayed |
+| CU-2 | Register | Fill name, phone, company, password -> Submit | Account created, redirected to MFA setup |
+| CU-3 | Setup MFA | Scan QR code with authenticator -> Enter 6-digit code -> Verify | MFA enrolled, redirected to dashboard |
+| CU-4 | First login | Enter credentials -> Enter TOTP code | Redirected to customer dashboard |
+| CU-5 | Browse spaces | Navigate to Spaces | Only assigned spaces visible |
+| CU-6 | View report | Select space -> Click report | Report rendered in sandboxed iframe via signed cookies |
+| CU-7 | Submit feedback | Open report -> Feedback tab -> Type message -> Attach file -> Submit | Thread created, admin notified |
+| CU-8 | View feedback reply | Notifications -> Click notification | Thread opens showing admin reply |
+| CU-9 | Cannot access other spaces | Attempt to navigate to another space URL | 403 Forbidden or redirect |
+| CU-10 | Cannot upload reports | No upload UI visible | Upload controls hidden for customer role |
+| CU-11 | Session expiry | Wait for token expiry while viewing report | Overlay shown, prompted to re-authenticate |
+| CU-12 | Expired invitation | Click invitation link after 24 hours | Error message: invitation expired |
+
+#### Journey 4: Report Viewing (Sequence)
+
+```mermaid
+sequenceDiagram
+    actor Customer
+    participant Frontend
+    participant API Gateway
+    participant Lambda
+    participant CloudFront
+    participant S3
+
+    Customer->>Frontend: Click report
+    Frontend->>API Gateway: GET /api/customer/spaces/{spaceId}/reports/{reportId}
+    API Gateway->>Lambda: Validate JWT + space access
+    Lambda->>Lambda: Generate signed cookies (3hr TTL)
+    Lambda->>Frontend: Return metadata + CloudFront /reports/* URL + cookies
+    Frontend->>CloudFront: Load report HTML via /reports/* (with signed cookies)
+    CloudFront->>S3: Strip /reports prefix, fetch from report bucket (OAC)
+    S3-->>CloudFront: Report HTML
+    CloudFront-->>Frontend: Report HTML
+    Frontend->>Frontend: Render in sandboxed iframe
+
+    Note over Frontend: Session expiry triggers overlay and re-auth required
+```
+
+#### Journey 5: Feedback and Notification (Sequence)
+
+```mermaid
+sequenceDiagram
+    actor Customer
+    actor Admin
+    participant API
+    participant DynamoDB
+    participant EventBridge
+    participant NotificationLambda as Notification Lambda
+    participant SES
+
+    Customer->>API: POST feedback (message + optional attachment)
+    API->>DynamoDB: Store thread + message
+    API->>EventBridge: Publish feedback.new
+    EventBridge->>NotificationLambda: Trigger
+    NotificationLambda->>DynamoDB: Create admin notifications
+    NotificationLambda->>SES: Send email to space admins
+    SES-->>Admin: Email notification
+
+    Note over Admin: Admin sees notification in portal
+
+    Admin->>API: POST reply to feedback thread
+    API->>DynamoDB: Store reply message
+    API->>EventBridge: Publish feedback.reply
+    EventBridge->>NotificationLambda: Trigger
+    NotificationLambda->>DynamoDB: Create customer notification
+    NotificationLambda->>SES: Send email to customer
+    SES-->>Customer: Email notification
+```
+
+#### Journey 6: Invitation (Sequence)
+
+```mermaid
+sequenceDiagram
+    actor Admin
+    participant API
+    participant Lambda
+    participant DynamoDB
+    participant SES
+    participant Cognito
+    participant EventBridge
+    participant NotificationLambda as Notification Lambda
+    actor Customer
+
+    Admin->>API: POST invite (email, spaceId)
+    API->>Lambda: Validate (domain check, role check)
+    Lambda->>DynamoDB: Store invitation (24hr TTL)
+    Lambda->>SES: Send invitation email
+    SES-->>Customer: Invitation email with link
+
+    Customer->>Customer: Click invitation link
+    Customer->>API: Load registration form
+    Customer->>API: POST register (name, phone, company, password)
+    API->>Cognito: Create user + set attributes
+    Cognito-->>Customer: User created
+
+    Customer->>Cognito: Setup MFA (TOTP)
+    Cognito-->>Customer: MFA configured
+
+    Customer->>API: First login
+    API->>EventBridge: Publish user.first_login
+    EventBridge->>NotificationLambda: Trigger
+    NotificationLambda->>DynamoDB: Create notification for inviting admin
+    NotificationLambda->>SES: Send email to inviting admin
+    SES-->>Admin: Customer accepted invitation
+```
+
 ## Architecture
 
 ### End-to-End System Architecture
@@ -481,174 +707,6 @@ Key auth features:
 | **Super Admin** | Full access, impersonation, admin invitations, space CRUD (@versent.com.au only) |
 | **Admin** | Manage assigned spaces, invite customers, upload reports, user management (@versent.com.au only) |
 | **Customer** | View reports in assigned spaces, submit feedback (invited only) |
-
-## User Journeys
-
-### 1. Super Admin Journey
-
-```mermaid
-journey
-    title Super Admin Journey
-    section Authentication
-      Login with credentials: 5: Super Admin
-      Complete MFA challenge: 5: Super Admin
-    section Dashboard
-      View dashboard overview: 5: Super Admin
-    section Space Management
-      Create customer space: 5: Super Admin
-      Invite admin (versent.com.au only): 5: Super Admin
-      Invite customer to space: 5: Super Admin
-    section Report Management
-      Upload reports to space: 5: Super Admin
-      View report (embedded iframe): 5: Super Admin
-      View report (full-tab mode): 5: Super Admin
-    section Monitoring
-      View analytics dashboard: 5: Super Admin
-      View audit log: 5: Super Admin
-    section Impersonation
-      Impersonate customer (read-only): 3: Super Admin
-      Browse as customer: 3: Super Admin
-      Exit impersonation: 5: Super Admin
-```
-
-### 2. Admin Journey
-
-```mermaid
-journey
-    title Admin Journey
-    section Authentication
-      Login with credentials: 5: Admin
-      Complete MFA challenge: 5: Admin
-    section Space Management
-      View assigned spaces: 5: Admin
-      Upload report to space: 5: Admin
-      Invite customer (domain mismatch warning): 4: Admin
-    section User Management
-      Disable user: 4: Admin
-      Enable user: 4: Admin
-      Reset user MFA: 4: Admin
-    section Feedback
-      View feedback threads: 5: Admin
-      Reply to customer feedback: 5: Admin
-    section Monitoring
-      View space analytics: 5: Admin
-      View audit log (assigned spaces): 5: Admin
-```
-
-### 3. Customer Journey
-
-```mermaid
-journey
-    title Customer Journey
-    section Onboarding
-      Receive invitation email: 5: Customer
-      Accept invitation link: 5: Customer
-      Register (name, phone, company, password): 4: Customer
-      Setup MFA (TOTP): 4: Customer
-    section Authentication
-      First login with new credentials: 5: Customer
-    section Report Viewing
-      Browse assigned spaces: 5: Customer
-      Open report (full-tab default): 5: Customer
-      Navigate report tabs: 5: Customer
-    section Feedback
-      Submit feedback with attachment: 4: Customer
-      Receive reply notification: 5: Customer
-      View resolved feedback: 5: Customer
-```
-
-### 4. Report Viewing Flow
-
-```mermaid
-sequenceDiagram
-    actor Customer
-    participant Frontend
-    participant API Gateway
-    participant Lambda
-    participant CloudFront
-    participant S3
-
-    Customer->>Frontend: Click report
-    Frontend->>API Gateway: GET /api/customer/spaces/{spaceId}/reports/{reportId}
-    API Gateway->>Lambda: Validate JWT + space access
-    Lambda->>Lambda: Generate signed cookies (3hr TTL)
-    Lambda->>Frontend: Return metadata + CloudFront /reports/* URL + cookies
-    Frontend->>CloudFront: Load report HTML via /reports/* (with signed cookies)
-    CloudFront->>S3: Strip /reports prefix, fetch from report bucket (OAC)
-    S3-->>CloudFront: Report HTML
-    CloudFront-->>Frontend: Report HTML
-    Frontend->>Frontend: Render in sandboxed iframe
-
-    Note over Frontend: Session expiry triggers overlay and re-auth required
-```
-
-### 5. Feedback and Notification Flow
-
-```mermaid
-sequenceDiagram
-    actor Customer
-    actor Admin
-    participant API
-    participant DynamoDB
-    participant EventBridge
-    participant NotificationLambda as Notification Lambda
-    participant SES
-
-    Customer->>API: POST feedback (message + optional attachment)
-    API->>DynamoDB: Store thread + message
-    API->>EventBridge: Publish feedback.new
-    EventBridge->>NotificationLambda: Trigger
-    NotificationLambda->>DynamoDB: Create admin notifications
-    NotificationLambda->>SES: Send email to space admins
-    SES-->>Admin: Email notification
-
-    Note over Admin: Admin sees notification in portal
-
-    Admin->>API: POST reply to feedback thread
-    API->>DynamoDB: Store reply message
-    API->>EventBridge: Publish feedback.reply
-    EventBridge->>NotificationLambda: Trigger
-    NotificationLambda->>DynamoDB: Create customer notification
-    NotificationLambda->>SES: Send email to customer
-    SES-->>Customer: Email notification
-```
-
-### 6. Invitation Flow
-
-```mermaid
-sequenceDiagram
-    actor Admin
-    participant API
-    participant Lambda
-    participant DynamoDB
-    participant SES
-    participant Cognito
-    participant EventBridge
-    participant NotificationLambda as Notification Lambda
-    actor Customer
-
-    Admin->>API: POST invite (email, spaceId)
-    API->>Lambda: Validate (domain check, role check)
-    Lambda->>DynamoDB: Store invitation (24hr TTL)
-    Lambda->>SES: Send invitation email
-    SES-->>Customer: Invitation email with link
-
-    Customer->>Customer: Click invitation link
-    Customer->>API: Load registration form
-    Customer->>API: POST register (name, phone, company, password)
-    API->>Cognito: Create user + set attributes
-    Cognito-->>Customer: User created
-
-    Customer->>Cognito: Setup MFA (TOTP)
-    Cognito-->>Customer: MFA configured
-
-    Customer->>API: First login
-    API->>EventBridge: Publish user.first_login
-    EventBridge->>NotificationLambda: Trigger
-    NotificationLambda->>DynamoDB: Create notification for inviting admin
-    NotificationLambda->>SES: Send email to inviting admin
-    SES-->>Admin: Customer accepted invitation
-```
 
 ## Environment Variables
 
