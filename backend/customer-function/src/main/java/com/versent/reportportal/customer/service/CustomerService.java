@@ -146,7 +146,7 @@ public class CustomerService {
 
         SignedCookieService.SignedCookieResult cookieResult = signedCookieService.generateSignedCookies(spaceId);
 
-        String cloudFrontUrl = "https://" + cloudFrontDomain + "/" + report.getS3Key();
+        String cloudFrontUrl = "https://" + cloudFrontDomain + "/reports/" + report.getS3Key();
 
         auditService.logEvent(currentUser.userId(), currentUser.email(),
                 "REPORT_VIEWED", spaceId + "/" + reportId, "SUCCESS");

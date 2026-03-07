@@ -18,8 +18,7 @@ flowchart TB
 
     subgraph Edge["AWS Edge Layer (us-east-1 + ap-southeast-2)"]
         WAF["🛡️ AWS WAF\n─────────────────\n• Core Rule Set (CRS)\n• Known Bad Inputs\n• Bot Control\n• Rate Limit: 1000/5min\n• Geo-block: AU only\n• SQL Injection / XSS\n• Path Traversal"]
-        CF_SPA["☁️ CloudFront\nPortal SPA\n─────────────────\n• HSTS (365 days)\n• X-Frame-Options\n• X-Content-Type-Options\n• Referrer-Policy"]
-        CF_Reports["☁️ CloudFront\nReport Serving\n─────────────────\n• Signed Cookies (3hr TTL)\n• Content-Security-Policy\n• Origin Access Control\n• XSS Protection"]
+        CF["☁️ CloudFront\nConsolidated Distribution\n─────────────────\n• / → SPA (Portal)\n• /api/* → API Gateway\n• /reports/* → Report S3\n• Signed Cookies (3hr TTL)\n• HSTS, CSP, OAC\n• HTTP/2 + HTTP/3"]
     end
 
     subgraph Hosting["Frontend Hosting (ap-southeast-2)"]
@@ -85,11 +84,10 @@ flowchart TB
 
     %% User flows
     SA & AD & CU --> WAF
-    WAF --> CF_SPA
-    WAF --> CF_Reports
-    CF_SPA --> S3_SPA
-    CF_Reports -->|"OAC"| S3_Cust
-    CF_SPA --> APIGW
+    WAF --> CF
+    CF --> S3_SPA
+    CF -->|"OAC"| S3_Cust
+    CF --> APIGW
 
     %% Auth flows
     APIGW <-->|"JWT validation"| Cognito
@@ -110,7 +108,7 @@ flowchart TB
     AdminFn --> S3_Cust
     AdminFn --> EB
     CustFn --> T1 & T2 & T3
-    CustFn -->|"Generate signed cookies"| CF_Reports
+    CustFn -->|"Generate signed cookies"| CF
     FeedFn --> T8 & T9 & T5
     FeedFn --> S3_Feedback
     FeedFn --> EB
@@ -140,7 +138,7 @@ flowchart TB
     classDef auth fill:#dd344c,stroke:#232f3e,color:#fff
     classDef kms fill:#8c4fff,stroke:#232f3e,color:#fff
 
-    class WAF,CF_SPA,CF_Reports edge
+    class WAF,CF edge
     class AuthFn,AdminFn,CustFn,FeedFn,AnalyticsFn,AuditFn,NotifFn,PreSignup compute
     class T1,T2,T3,T4,T5,T6,T7,T8,T9,S3_Cust,S3_Feedback,S3_Audit,S3_SPA storage
     class EB,SES,E1,E2,E3,E4,E5 event
@@ -161,7 +159,7 @@ flowchart LR
         EventsStack["📡 EventsStack\n─────────────────\n• EventBridge Bus\n• 90-day Archive"]
         EmailStack["📧 EmailStack\n─────────────────\n• SES Domain Identity\n• Bounce SNS Topic\n• Bounce Handler Lambda"]
         ApiStack["⚡ ApiStack\n─────────────────\n• API Gateway\n• 7 Lambda Functions\n• EventBridge Rules\n• IAM Policies"]
-        FrontendStack["☁️ FrontendStack\n─────────────────\n• 2 CloudFront Distributions\n• S3 Hosting Buckets\n• Security Headers\n• Signed Cookie Config"]
+        FrontendStack["☁️ FrontendStack\n─────────────────\n• 1 CloudFront Distribution\n  (/, /api/*, /reports/*)\n• S3 Hosting Buckets\n• Security Headers\n• Signed Cookie Config"]
         MonitoringStack["📊 MonitoringStack\n─────────────────\n• CloudWatch Dashboard\n• SNS Alarm Topic\n• Metric Alarms"]
     end
 
@@ -335,7 +333,8 @@ After first deployment, the super admin account is seeded:
 - **CloudFront signed cookies** for report access (3-hour TTL)
 - **Cognito MFA enforced** (TOTP preferred)
 - **JWT tokens** with 15-min access / 1-hour refresh expiry
-- **Content Security Policy** on report-serving CloudFront
+- **Single CloudFront distribution** with path-based routing (`/`, `/api/*`, `/reports/*`)
+- **Content Security Policy** on report-serving paths
 - **iframe sandboxing** for HTML reports
 - **HTML sanitization** on upload (OWASP Java HTML Sanitizer)
 - **CORS** explicitly configured on API Gateway and CloudFront
@@ -455,12 +454,12 @@ sequenceDiagram
     participant S3
 
     Customer->>Frontend: Click report
-    Frontend->>API Gateway: GET /customer/spaces/{spaceId}/reports/{reportId}
+    Frontend->>API Gateway: GET /api/customer/spaces/{spaceId}/reports/{reportId}
     API Gateway->>Lambda: Validate JWT + space access
-    Lambda->>CloudFront: Generate signed cookies (3hr TTL)
-    Lambda->>Frontend: Return metadata + CloudFront URL + cookies
-    Frontend->>CloudFront: Load report HTML (with signed cookies)
-    CloudFront->>S3: Fetch from customer bucket (OAC)
+    Lambda->>Lambda: Generate signed cookies (3hr TTL)
+    Lambda->>Frontend: Return metadata + CloudFront /reports/* URL + cookies
+    Frontend->>CloudFront: Load report HTML via /reports/* (with signed cookies)
+    CloudFront->>S3: Strip /reports prefix, fetch from report bucket (OAC)
     S3-->>CloudFront: Report HTML
     CloudFront-->>Frontend: Report HTML
     Frontend->>Frontend: Render in sandboxed iframe

@@ -19,7 +19,6 @@ export interface FrontendStackProps extends cdk.StackProps {
 
 export class FrontendStack extends cdk.Stack {
   public readonly portalDistribution: cloudfront.Distribution;
-  public readonly reportDistribution: cloudfront.Distribution;
   public readonly portalBucket: s3.Bucket;
   public readonly reportServingBucket: s3.Bucket;
 
@@ -43,7 +42,7 @@ export class FrontendStack extends cdk.Stack {
       autoDeleteObjects: !isProd,
     });
 
-    // Report serving bucket (serves report HTML via CloudFront)
+    // Report serving bucket (serves report HTML via CloudFront /reports/* path)
     this.reportServingBucket = new s3.Bucket(this, 'ReportServingBucket', {
       bucketName: `report-portal-reports-serving-${cdk.Aws.ACCOUNT_ID}-${cdk.Aws.REGION}-${environmentName}`,
       encryption: s3.BucketEncryption.S3_MANAGED,
@@ -55,8 +54,6 @@ export class FrontendStack extends cdk.Stack {
 
     // ========== CloudFront Signed Cookie Key Group ==========
 
-    // Create a CloudFront public key for signed cookies
-    // The actual PEM key must be stored in SSM Parameter Store before deployment
     const publicKey = new cloudfront.PublicKey(this, 'SignedCookiePublicKey', {
       publicKeyName: `report-portal-signed-cookie-key-${environmentName}`,
       encodedKey: cdk.Fn.sub(
@@ -72,7 +69,7 @@ export class FrontendStack extends cdk.Stack {
       comment: 'Key group for Report Portal signed cookies',
     });
 
-    // ========== Security Headers Response Policy ==========
+    // ========== Security Headers Response Policies ==========
 
     // Portal security headers
     const portalSecurityHeaders = new cloudfront.ResponseHeadersPolicy(this, 'PortalSecurityHeaders', {
@@ -127,10 +124,10 @@ export class FrontendStack extends cdk.Stack {
       },
     });
 
-    // Report-serving security headers (allows Mermaid CDN)
+    // Report-serving security headers (allows Mermaid CDN, used for /reports/* behavior)
     const reportSecurityHeaders = new cloudfront.ResponseHeadersPolicy(this, 'ReportSecurityHeaders', {
       responseHeadersPolicyName: `report-portal-report-headers-${environmentName}`,
-      comment: 'Security headers for report-serving CloudFront distribution',
+      comment: 'Security headers for report content served under /reports/*',
       securityHeadersBehavior: {
         strictTransportSecurity: {
           accessControlMaxAge: cdk.Duration.days(365),
@@ -171,7 +168,7 @@ export class FrontendStack extends cdk.Stack {
       },
     });
 
-    // ========== Origin Access Control ==========
+    // ========== Origin Access Controls ==========
 
     const portalOac = new cloudfront.S3OriginAccessControl(this, 'PortalOAC', {
       originAccessControlName: `report-portal-spa-oac-${environmentName}`,
@@ -185,8 +182,6 @@ export class FrontendStack extends cdk.Stack {
 
     // ========== API Gateway Origin (CloudFront → API Gateway) ==========
 
-    // Extract API Gateway domain from the REST API URL
-    // API GW URL format: https://{restApiId}.execute-api.{region}.amazonaws.com/{stage}
     const apiDomainName = `${api.restApiId}.execute-api.${cdk.Aws.REGION}.amazonaws.com`;
 
     const apiOrigin = new origins.HttpOrigin(apiDomainName, {
@@ -198,7 +193,6 @@ export class FrontendStack extends cdk.Stack {
     });
 
     // CloudFront Function to strip /api prefix before forwarding to API Gateway
-    // Request: /api/auth/login → origin receives /auth/login (with originPath prepending /{stage})
     const apiPathRewrite = new cloudfront.Function(this, 'ApiPathRewrite', {
       functionName: `report-portal-api-rewrite-${environmentName}`,
       comment: 'Strip /api prefix from requests before forwarding to API Gateway',
@@ -213,13 +207,28 @@ function handler(event) {
       runtime: cloudfront.FunctionRuntime.JS_2_0,
     });
 
-    // Use built-in no-cache policy for API requests
+    // CloudFront Function to strip /reports prefix before forwarding to report S3 bucket
+    const reportPathRewrite = new cloudfront.Function(this, 'ReportPathRewrite', {
+      functionName: `report-portal-report-rewrite-${environmentName}`,
+      comment: 'Strip /reports prefix from requests before forwarding to report S3 bucket',
+      code: cloudfront.FunctionCode.fromInline(`
+function handler(event) {
+  var request = event.request;
+  request.uri = request.uri.replace(/^\\/reports/, '');
+  if (request.uri === '') request.uri = '/';
+  return request;
+}
+      `.trim()),
+      runtime: cloudfront.FunctionRuntime.JS_2_0,
+    });
+
     const apiCachePolicy = cloudfront.CachePolicy.CACHING_DISABLED;
 
-    // ========== Portal CloudFront Distribution ==========
+    // ========== Consolidated CloudFront Distribution ==========
+    // Serves: SPA (default), API (/api/*), and reports (/reports/* with signed cookies)
 
     this.portalDistribution = new cloudfront.Distribution(this, 'PortalDistribution', {
-      comment: `Report Portal SPA (${environmentName})`,
+      comment: `Report Portal (${environmentName})`,
       defaultBehavior: {
         origin: origins.S3BucketOrigin.withOriginAccessControl(this.portalBucket, {
           originAccessControl: portalOac,
@@ -245,6 +254,23 @@ function handler(event) {
             },
           ],
         },
+        '/reports/*': {
+          origin: origins.S3BucketOrigin.withOriginAccessControl(this.reportServingBucket, {
+            originAccessControl: reportOac,
+          }),
+          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
+          responseHeadersPolicy: reportSecurityHeaders,
+          compress: true,
+          allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+          trustedKeyGroups: [keyGroup],
+          functionAssociations: [
+            {
+              function: reportPathRewrite,
+              eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
+            },
+          ],
+        },
       },
       defaultRootObject: 'index.html',
       errorResponses: [
@@ -266,42 +292,6 @@ function handler(event) {
       webAclId: webAclArn,
       priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
       enabled: true,
-    });
-
-    // ========== Report-Serving CloudFront Distribution ==========
-
-    this.reportDistribution = new cloudfront.Distribution(this, 'ReportDistribution', {
-      comment: `Report Portal - Report Serving (${environmentName})`,
-      defaultBehavior: {
-        origin: origins.S3BucketOrigin.withOriginAccessControl(this.reportServingBucket, {
-          originAccessControl: reportOac,
-        }),
-        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-        cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
-        responseHeadersPolicy: reportSecurityHeaders,
-        compress: true,
-        allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
-        trustedKeyGroups: [keyGroup],
-      },
-      minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
-      httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
-      webAclId: webAclArn,
-      priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
-      enabled: true,
-      errorResponses: [
-        {
-          httpStatus: 403,
-          responseHttpStatus: 403,
-          responsePagePath: '/error/403.html',
-          ttl: cdk.Duration.seconds(10),
-        },
-        {
-          httpStatus: 404,
-          responseHttpStatus: 404,
-          responsePagePath: '/error/404.html',
-          ttl: cdk.Duration.seconds(10),
-        },
-      ],
     });
 
     // ========== S3 Bucket Policies for OAC ==========
@@ -330,7 +320,7 @@ function handler(event) {
         resources: [this.reportServingBucket.arnForObjects('*')],
         conditions: {
           StringEquals: {
-            'AWS:SourceArn': `arn:aws:cloudfront::${cdk.Aws.ACCOUNT_ID}:distribution/${this.reportDistribution.distributionId}`,
+            'AWS:SourceArn': `arn:aws:cloudfront::${cdk.Aws.ACCOUNT_ID}:distribution/${this.portalDistribution.distributionId}`,
           },
         },
       })
@@ -346,16 +336,6 @@ function handler(event) {
     new cdk.CfnOutput(this, 'PortalDistributionDomain', {
       value: this.portalDistribution.distributionDomainName,
       exportName: `${id}-PortalDistributionDomain`,
-    });
-
-    new cdk.CfnOutput(this, 'ReportDistributionId', {
-      value: this.reportDistribution.distributionId,
-      exportName: `${id}-ReportDistributionId`,
-    });
-
-    new cdk.CfnOutput(this, 'ReportDistributionDomain', {
-      value: this.reportDistribution.distributionDomainName,
-      exportName: `${id}-ReportDistributionDomain`,
     });
 
     new cdk.CfnOutput(this, 'PortalBucketName', {
