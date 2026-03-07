@@ -1,99 +1,61 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: ./scripts/deploy.sh [environment]
+# Usage: ./scripts/deploy.sh [environment] [--skip-infra] [--watch]
 # Example: ./scripts/deploy.sh dev
-#          ./scripts/deploy.sh staging
-#          ./scripts/deploy.sh prod
+#          ./scripts/deploy.sh staging --skip-infra
+#          ./scripts/deploy.sh prod --watch
+#
+# Triggers the Deploy workflow in GitHub Actions.
+# Requires: gh CLI (https://cli.github.com)
 
 ENVIRONMENT="${1:-dev}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SKIP_INFRA=false
+WATCH=false
+
+shift || true
+for arg in "$@"; do
+  case "$arg" in
+    --skip-infra) SKIP_INFRA=true ;;
+    --watch)      WATCH=true ;;
+    *)            echo "Unknown argument: $arg"; exit 1 ;;
+  esac
+done
+
+# Validate environment
+if [[ ! "$ENVIRONMENT" =~ ^(dev|staging|prod)$ ]]; then
+  echo "ERROR: Invalid environment '$ENVIRONMENT'. Must be dev, staging, or prod."
+  exit 1
+fi
+
+# Check gh CLI is available
+if ! command -v gh &> /dev/null; then
+  echo "ERROR: GitHub CLI (gh) is required. Install from https://cli.github.com"
+  exit 1
+fi
 
 echo "============================================"
-echo " Report Portal - Full Deployment"
+echo " Report Portal - Triggering Deployment"
 echo " Environment: ${ENVIRONMENT}"
+echo " Skip Infra:  ${SKIP_INFRA}"
 echo "============================================"
-
-# ========== 1. Build Backend ==========
 echo ""
-echo "[1/5] Building backend (Java 21 + Spring Boot 3)..."
-cd "$ROOT_DIR/backend"
-./mvnw clean package -DskipTests -q
-echo "  ✓ Backend JARs built"
 
-# ========== 2. Build Frontend ==========
+gh workflow run deploy.yml \
+  -f environment="$ENVIRONMENT" \
+  -f skip_infra="$SKIP_INFRA"
+
+echo "Deploy workflow triggered successfully."
 echo ""
-echo "[2/5] Building frontend (React + Vite)..."
-cd "$ROOT_DIR/frontend"
-npm install --silent
-npm run build 2>&1 | tail -3
-echo "  ✓ Frontend built"
 
-# ========== 3. CDK Synth (validate) ==========
-echo ""
-echo "[3/5] Validating CDK templates..."
-cd "$ROOT_DIR/infrastructure"
-npm install --silent
-npm run build 2>&1 | tail -1
-npx cdk synth --context environment="$ENVIRONMENT" --quiet 2>&1 | tail -1
-echo "  ✓ CDK templates validated"
-
-# ========== 4. CDK Deploy ==========
-echo ""
-echo "[4/5] Deploying all CDK stacks..."
-npx cdk deploy --all \
-  --context environment="$ENVIRONMENT" \
-  --require-approval never \
-  --outputs-file "$ROOT_DIR/cdk-outputs.json" \
-  2>&1
-
-echo "  ✓ All stacks deployed"
-
-# ========== 5. Deploy Frontend to S3 + CloudFront Invalidation ==========
-echo ""
-echo "[5/5] Deploying frontend to S3 and invalidating CloudFront..."
-
-# Extract outputs from CDK
-STACK_PREFIX="ReportPortal-${ENVIRONMENT}"
-SPA_BUCKET=$(jq -r ".\"${STACK_PREFIX}-Frontend\".PortalBucketName" "$ROOT_DIR/cdk-outputs.json")
-DISTRIBUTION_ID=$(jq -r ".\"${STACK_PREFIX}-Frontend\".PortalDistributionId" "$ROOT_DIR/cdk-outputs.json")
-CF_DOMAIN=$(jq -r ".\"${STACK_PREFIX}-Frontend\".PortalDistributionDomain" "$ROOT_DIR/cdk-outputs.json")
-COGNITO_POOL_ID=$(jq -r ".\"${STACK_PREFIX}-Auth\".UserPoolId" "$ROOT_DIR/cdk-outputs.json")
-COGNITO_CLIENT_ID=$(jq -r ".\"${STACK_PREFIX}-Auth\".PortalClientId" "$ROOT_DIR/cdk-outputs.json")
-
-# Generate frontend .env.production with actual values
-cat > "$ROOT_DIR/frontend/.env.production" <<EOF
-VITE_API_BASE_URL=https://${CF_DOMAIN}/api
-VITE_COGNITO_USER_POOL_ID=${COGNITO_POOL_ID}
-VITE_COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID}
-VITE_COGNITO_REGION=${AWS_REGION:-ap-southeast-2}
-VITE_CLOUDFRONT_DOMAIN=https://${CF_DOMAIN}
-EOF
-
-# Rebuild frontend with production env
-cd "$ROOT_DIR/frontend"
-npm run build 2>&1 | tail -1
-
-# Sync to S3
-aws s3 sync dist/ "s3://${SPA_BUCKET}/" --delete
-
-# Invalidate CloudFront cache
-aws cloudfront create-invalidation \
-  --distribution-id "$DISTRIBUTION_ID" \
-  --paths "/*" \
-  --output text \
-  --query 'Invalidation.Id'
-
-echo "  ✓ Frontend deployed to S3 and CloudFront invalidated"
-
-# ========== Summary ==========
-echo ""
-echo "============================================"
-echo " Deployment Complete!"
-echo "============================================"
-echo " Portal URL:  https://${CF_DOMAIN}"
-echo " Environment: ${ENVIRONMENT}"
-echo " SPA Bucket:  ${SPA_BUCKET}"
-echo " Distribution: ${DISTRIBUTION_ID}"
-echo "============================================"
+if [ "$WATCH" == "true" ]; then
+  echo "Waiting for workflow to start..."
+  sleep 3
+  RUN_ID=$(gh run list --workflow=deploy.yml --limit=1 --json databaseId --jq '.[0].databaseId')
+  echo "Watching run: https://github.com/$(gh repo view --json nameWithOwner --jq '.nameWithOwner')/actions/runs/${RUN_ID}"
+  echo ""
+  gh run watch "$RUN_ID"
+else
+  echo "Run 'gh run list --workflow=deploy.yml' to check status."
+  echo "Or re-run with --watch to follow the workflow."
+fi
