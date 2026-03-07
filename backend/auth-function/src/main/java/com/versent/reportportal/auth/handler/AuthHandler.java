@@ -9,7 +9,6 @@ import com.versent.reportportal.auth.service.AuthService;
 import jakarta.validation.Valid;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,7 +17,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
-import java.util.function.Function;
 
 @SpringBootApplication
 @ComponentScan(basePackages = {
@@ -68,29 +66,4 @@ public class AuthHandler {
         ));
     }
 
-    @Bean
-    public Function<Map<String, Object>, ResponseEntity<?>> authFunction() {
-        return request -> {
-            String path = (String) request.getOrDefault("path", "");
-            @SuppressWarnings("unchecked")
-            Map<String, String> body = (Map<String, String>) request.getOrDefault("body", Map.of());
-
-            return switch (path) {
-                case "/auth/login" -> ResponseEntity.ok(authService.login(
-                        new LoginRequest(body.get("email"), body.get("password"))));
-                case "/auth/mfa-verify" -> ResponseEntity.ok(authService.verifyMfa(
-                        new MfaVerifyRequest(body.get("session"), body.get("mfaCode"),
-                                body.get("challengeName"))));
-                case "/auth/forgot-password" -> ResponseEntity.ok(authService.forgotPassword(
-                        new PasswordResetRequest(body.get("email"),
-                                body.get("confirmationCode"), body.get("newPassword"))));
-                case "/auth/change-password" -> ResponseEntity.ok(authService.changePassword(
-                        new ChangePasswordRequest(body.get("accessToken"),
-                                body.get("previousPassword"), body.get("newPassword"))));
-                case "/auth/first-login" -> ResponseEntity.ok(authService.firstLogin(
-                        body.get("session"), body.get("newPassword"), body.get("mfaCode")));
-                default -> ResponseEntity.notFound().build();
-            };
-        };
-    }
 }
