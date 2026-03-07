@@ -9,6 +9,7 @@ import { FrontendStack } from '../lib/stacks/frontend-stack';
 import { SecurityStack } from '../lib/stacks/security-stack';
 import { EmailStack } from '../lib/stacks/email-stack';
 import { MonitoringStack } from '../lib/stacks/monitoring-stack';
+import { GitHubOidcStack } from '../lib/stacks/github-oidc-stack';
 
 export interface EnvironmentConfig {
   account: string;
@@ -146,6 +147,15 @@ const monitoringStack = new MonitoringStack(app, `${prefix}-Monitoring`, {
   ],
   tags: commonTags,
   description: `Report Portal Monitoring Stack (${environmentName})`,
+});
+
+// GitHub Actions OIDC — deploy once per account to enable CI/CD
+const githubOidcStack = new GitHubOidcStack(app, `ReportPortal-GitHubOIDC`, {
+  env,
+  githubOrg: 'shanaka-versent',
+  githubRepo: 'ReportsPortal',
+  tags: commonTags,
+  description: 'GitHub Actions OIDC provider and deploy role (one-time setup)',
 });
 
 // Stack dependencies
