@@ -1,5 +1,6 @@
 import { test, expect } from '../../fixtures/auth.fixture';
 import { selectors } from '../../helpers/selectors';
+import path from 'path';
 
 /**
  * VIDEO 2: "Platform Management — Spaces & Reports"
@@ -103,11 +104,12 @@ test.describe('Video 2: Platform Management — Spaces & Reports', () => {
     });
 
     // "The space is live. Now we need to deliver something valuable — a report.
-    //  We'll upload an HTML report that contains styled metrics and charts.
-    //  The platform stores it in S3 and serves it through CloudFront with
-    //  signed cookies, so only authorised users can access the content."
+    //  We'll upload a real architecture review report with accompanying
+    //  diagrams. The platform supports multi-file uploads: an HTML report
+    //  plus images referenced within it. Everything is stored in S3 and
+    //  served through CloudFront with signed cookies."
 
-    await test.step('Scene 4: Upload a polished HTML report', async () => {
+    await test.step('Scene 4: Upload a real report with images', async () => {
       // Navigate into the space if we're still on the list
       const spaceCard = page.locator(selectors.spaceList.spaceCard).filter({
         hasText: testSpaceName,
@@ -126,69 +128,28 @@ test.describe('Video 2: Platform Management — Spaces & Reports', () => {
         await uploadButton.click();
         await page.waitForTimeout(1500);
 
+        // Upload the HTML report along with its image assets
         const fileInput = page.locator(selectors.spaceDetail.uploadFileInput).first();
         const isFileInputPresent = await fileInput.count() > 0;
 
         if (isFileInputPresent) {
-          await fileInput.setInputFiles({
-            name: 'acme-q3-assessment.html',
-            mimeType: 'text/html',
-            buffer: Buffer.from(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Acme Corp — Q3 Security Assessment</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f1f5f9; color: #1e293b; padding: 48px; }
-    h1 { font-size: 2rem; margin-bottom: 8px; }
-    .subtitle { color: #64748b; margin-bottom: 32px; font-size: 1.1rem; }
-    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 32px; }
-    .card { background: #fff; border-radius: 12px; padding: 28px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-    .card h3 { color: #64748b; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
-    .metric { font-size: 2.4rem; font-weight: 700; }
-    .green { color: #16a34a; }
-    .blue { color: #2563eb; }
-    .amber { color: #d97706; }
-    .section { background: #fff; border-radius: 12px; padding: 28px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-    .section h2 { font-size: 1.2rem; margin-bottom: 16px; color: #0f172a; }
-    .bar { height: 12px; border-radius: 6px; background: #e2e8f0; margin: 8px 0; }
-    .bar-fill { height: 100%; border-radius: 6px; }
-    .finding { padding: 12px 0; border-bottom: 1px solid #f1f5f9; }
-    .finding:last-child { border: none; }
-    .badge { display: inline-block; padding: 2px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }
-    .badge-low { background: #dcfce7; color: #166534; }
-    .badge-med { background: #fef9c3; color: #854d0e; }
-    .badge-high { background: #fee2e2; color: #991b1b; }
-  </style>
-</head>
-<body>
-  <h1>Acme Corp — Q3 Security Assessment</h1>
-  <p class="subtitle">Prepared by Versent Security Team | September 2025</p>
-  <div class="grid">
-    <div class="card"><h3>Overall Score</h3><p class="metric green">94/100</p></div>
-    <div class="card"><h3>Critical Findings</h3><p class="metric blue">0</p></div>
-    <div class="card"><h3>Items Remediated</h3><p class="metric amber">12 of 14</p></div>
-  </div>
-  <div class="section">
-    <h2>Compliance Coverage</h2>
-    <p style="margin-bottom:12px">SOC 2 Type II controls assessed against 142 criteria.</p>
-    <div class="bar"><div class="bar-fill" style="width:94%;background:#16a34a"></div></div>
-    <p style="margin-top:4px;color:#64748b;font-size:0.9rem">94% compliant (134 / 142 controls)</p>
-  </div>
-  <div class="section">
-    <h2>Open Findings</h2>
-    <div class="finding"><span class="badge badge-med">Medium</span> Logging retention below 90-day threshold in staging</div>
-    <div class="finding"><span class="badge badge-low">Low</span> MFA not enforced for CI/CD service accounts</div>
-  </div>
-</body>
-</html>`),
-          });
-          await page.waitForTimeout(2500);
+          const fixturesDir = path.resolve(__dirname, '../../fixtures/reports');
+          await fileInput.setInputFiles([
+            path.join(fixturesDir, 'architecture-review.html'),
+            path.join(fixturesDir, 'spider-chart.png'),
+            path.join(fixturesDir, 'platform-architecture.png'),
+          ]);
+          await page.waitForTimeout(2000);
+
+          // "Notice the upload panel shows the HTML file plus 2 images.
+          //  The platform will upload all files under the same report ID
+          //  so relative image references resolve correctly."
+          await page.waitForTimeout(1500);
         }
       }
 
-      await page.waitForTimeout(1500);
+      // Wait for upload to complete (progress bar)
+      await page.waitForTimeout(3000);
     });
 
     // "The report is uploaded. Let's preview it exactly as the customer will

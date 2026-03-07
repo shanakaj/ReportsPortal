@@ -122,8 +122,8 @@ describe('AuthContext', () => {
       await new Promise((r) => setTimeout(r, 100));
     });
 
-    const auth = screen.getByTestId('user');
-    const authContext = await act(async () => {
+    screen.getByTestId('user');
+    await act(async () => {
       // Trigger login
       const ctx = await import('@/services/auth');
       await ctx.login('admin@versent.com.au', 'password');

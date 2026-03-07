@@ -1,5 +1,6 @@
 import { test, expect } from '../../fixtures/auth.fixture';
 import { selectors } from '../../helpers/selectors';
+import path from 'path';
 
 /**
  * VIDEO 8: "Admin Experience — Scoped Access & Feedback"
@@ -120,7 +121,7 @@ test.describe('Video 8: Admin Experience — Scoped Access & Feedback', () => {
         }
         await page.waitForTimeout(1000);
 
-        // Upload a report
+        // Upload a real report — the AppXray assessment from the quickreport project
         const uploadButton = page.locator(selectors.spaceDetail.uploadButton).first();
         const isUploadVisible = await uploadButton.isVisible().catch(() => false);
 
@@ -132,36 +133,11 @@ test.describe('Video 8: Admin Experience — Scoped Access & Feedback', () => {
           const isFileInputPresent = await fileInput.count() > 0;
 
           if (isFileInputPresent) {
-            await fileInput.setInputFiles({
-              name: 'weekly-status-update.html',
-              mimeType: 'text/html',
-              buffer: Buffer.from(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Weekly Status Update</title>
-  <style>
-    body { font-family: system-ui, sans-serif; padding: 40px; background: #fafafa; color: #1a1a2e; }
-    h1 { color: #16213e; }
-    .status { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 0.85rem; font-weight: 600; }
-    .on-track { background: #d4edda; color: #155724; }
-    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e0e0e0; }
-    th { background: #f8f9fa; font-weight: 600; }
-  </style>
-</head>
-<body>
-  <h1>Weekly Status Update</h1>
-  <p>Week ending March 7, 2026 <span class="status on-track">On Track</span></p>
-  <table>
-    <tr><th>Workstream</th><th>Status</th><th>Notes</th></tr>
-    <tr><td>Infrastructure Migration</td><td>Complete</td><td>All workloads migrated to target VPC</td></tr>
-    <tr><td>Security Hardening</td><td>In Progress</td><td>WAF rules deployed, pen test scheduled</td></tr>
-    <tr><td>Compliance Review</td><td>Pending</td><td>SOC 2 evidence collection begins next week</td></tr>
-  </table>
-</body>
-</html>`),
-            });
+            // Upload the self-contained AppXray report (6.5MB with embedded images)
+            const fixturesDir = path.resolve(__dirname, '../../fixtures/reports');
+            await fileInput.setInputFiles(
+              path.join(fixturesDir, 'appxray-report.html'),
+            );
             await page.waitForTimeout(2500);
           }
         }

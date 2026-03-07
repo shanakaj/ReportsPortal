@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AxiosHeaders } from 'axios';
-import type { InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
+import type { InternalAxiosRequestConfig, AxiosError } from 'axios';
 
 // Mock the auth service module that api.ts dynamically imports
 const mockRefreshSession = vi.fn();

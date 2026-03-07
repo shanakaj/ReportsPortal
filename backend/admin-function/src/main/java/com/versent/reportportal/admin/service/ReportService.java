@@ -171,6 +171,39 @@ public class ReportService {
                 "REPORT_DELETED", spaceId + "/" + reportId, "SUCCESS");
     }
 
+    public UploadReportResponse generateAssetUploadUrl(String spaceId, String reportId, String fileName, String contentType) {
+        SecurityContext.getCurrentUser(); // ensure authenticated
+
+        ReportEntity report = reportTable.getItem(Key.builder()
+                .partitionValue(ReportEntity.buildPk(spaceId))
+                .sortValue(ReportEntity.buildSk(reportId))
+                .build());
+
+        if (report == null) {
+            throw new ResourceNotFoundException("Report not found: " + reportId);
+        }
+
+        SpaceEntity space = spaceService.getSpaceEntity(spaceId);
+        String s3Key = "reports/" + reportId + "/" + fileName;
+
+        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                .bucket(space.getS3BucketName())
+                .key(s3Key)
+                .contentType(contentType != null ? contentType : "application/octet-stream")
+                .build();
+
+        PutObjectPresignRequest presignRequest = PutObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofMinutes(15))
+                .putObjectRequest(putObjectRequest)
+                .build();
+
+        PresignedPutObjectRequest presignedRequest = s3Presigner.presignPutObject(presignRequest);
+
+        log.info("Asset upload URL generated: spaceId={}, reportId={}, fileName={}", spaceId, reportId, fileName);
+
+        return new UploadReportResponse(reportId, presignedRequest.url().toString(), s3Key);
+    }
+
     private ReportResponse toResponse(ReportEntity entity) {
         return new ReportResponse(
                 entity.getReportId(),
