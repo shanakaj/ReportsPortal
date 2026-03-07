@@ -108,6 +108,18 @@ public class AdminHandler {
                 .body(reportService.initiateUpload(spaceId, request));
     }
 
+    @PostMapping("/spaces/{spaceId}/reports/{reportId}/assets")
+    public ResponseEntity<UploadReportResponse> uploadReportAsset(
+            @PathVariable String spaceId,
+            @PathVariable String reportId,
+            @Valid @RequestBody UploadReportRequest request) {
+        roleChecker.requireAdminWithSpaceAccess(spaceId);
+        roleChecker.requireNotReadOnly();
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(reportService.generateAssetUploadUrl(spaceId, reportId,
+                        request.fileName(), request.contentType()));
+    }
+
     @DeleteMapping("/spaces/{spaceId}/reports/{reportId}")
     public ResponseEntity<Void> deleteReport(
             @PathVariable String spaceId,

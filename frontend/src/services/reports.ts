@@ -47,6 +47,19 @@ export async function uploadReportFile(
   });
 }
 
+export async function getAssetUploadUrl(
+  spaceId: string,
+  reportId: string,
+  fileName: string,
+  contentType: string,
+): Promise<{ uploadUrl: string }> {
+  const { data } = await api.post<{ uploadUrl: string }>(
+    `/admin/spaces/${spaceId}/reports/${reportId}/assets`,
+    { fileName, contentType },
+  );
+  return data;
+}
+
 export async function deleteReport(spaceId: string, reportId: string): Promise<void> {
   await api.delete(`/admin/spaces/${spaceId}/reports/${reportId}`);
 }
