@@ -104,6 +104,27 @@ jobs:
             echo "geo_blocked=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Get Cognito User Pool ID
+        if: steps.geo-check.outputs.geo_blocked != 'true'
+        id: cognito
+        run: |
+          STACK_PREFIX="ReportPortal-${{ inputs.environment }}"
+          USER_POOL_ID=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_PREFIX}-Auth" \
+            --query "Stacks[0].Outputs[?OutputKey=='UserPoolId'].OutputValue" \
+            --output text)
+          echo "user_pool_id=${USER_POOL_ID}" >> "$GITHUB_OUTPUT"
+          echo "Cognito User Pool: ${USER_POOL_ID}"
+
+      - name: Reset test user for E2E (password + MFA)
+        if: steps.geo-check.outputs.geo_blocked != 'true'
+        run: |
+          chmod +x e2e/scripts/reset-test-user.sh
+          e2e/scripts/reset-test-user.sh \
+            "${{ steps.cognito.outputs.user_pool_id }}" \
+            "${{ secrets.SUPER_ADMIN_EMAIL }}" \
+            "${{ secrets.SUPER_ADMIN_PASSWORD }}"
+
       - name: Run E2E tests
         if: steps.geo-check.outputs.geo_blocked != 'true'
         working-directory: e2e

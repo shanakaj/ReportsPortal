@@ -1,6 +1,7 @@
 import { FullConfig } from '@playwright/test';
 import * as dotenv from 'dotenv';
 import path from 'path';
+import { generateTotpCode } from './helpers/totp';
 
 dotenv.config({ path: path.resolve(__dirname, '.env') });
 
@@ -50,11 +51,19 @@ async function apiRequest(
   return fetch(url, options);
 }
 
-async function loginUser(baseURL: string, email: string, password: string): Promise<string> {
+async function loginUser(
+  baseURL: string,
+  email: string,
+  password: string,
+  totpSecret?: string,
+): Promise<string> {
   const apiBase = process.env.API_BASE_URL || baseURL;
+  const UA =
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
   const response = await fetch(`${apiBase}/auth/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'User-Agent': UA },
     body: JSON.stringify({ email, password }),
   });
 
@@ -62,8 +71,83 @@ async function loginUser(baseURL: string, email: string, password: string): Prom
     throw new Error(`Login failed for ${email}: ${response.status} ${response.statusText}`);
   }
 
-  const data = (await response.json()) as { accessToken?: string; idToken?: string };
-  return data.accessToken || data.idToken || '';
+  const data = (await response.json()) as {
+    accessToken?: string;
+    idToken?: string;
+    challengeName?: string;
+    session?: string;
+    secretCode?: string;
+  };
+
+  // Direct tokens - no MFA
+  if (data.accessToken) {
+    return data.accessToken;
+  }
+
+  // Handle MFA_SETUP challenge (first time after MFA reset)
+  if (data.challengeName === 'MFA_SETUP' && data.secretCode && data.session) {
+    console.log(`[global-setup] MFA_SETUP challenge for ${email}, setting up TOTP...`);
+    const code = generateTotpCode(data.secretCode);
+    const verifyResp = await fetch(`${apiBase}/auth/mfa-verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': UA },
+      body: JSON.stringify({ session: data.session, mfaCode: code, challengeName: 'MFA_SETUP' }),
+    });
+    if (verifyResp.ok) {
+      const verifyData = (await verifyResp.json()) as {
+        accessToken?: string;
+        challengeName?: string;
+        session?: string;
+      };
+      if (verifyData.accessToken) return verifyData.accessToken;
+      // May need SOFTWARE_TOKEN_MFA after setup
+      if (verifyData.challengeName === 'SOFTWARE_TOKEN_MFA' && verifyData.session) {
+        const finalCode = generateTotpCode(data.secretCode);
+        const finalResp = await fetch(`${apiBase}/auth/mfa-verify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'User-Agent': UA },
+          body: JSON.stringify({
+            session: verifyData.session,
+            mfaCode: finalCode,
+            challengeName: 'SOFTWARE_TOKEN_MFA',
+          }),
+        });
+        if (finalResp.ok) {
+          const finalData = (await finalResp.json()) as { accessToken?: string };
+          return finalData.accessToken || '';
+        }
+      }
+    }
+    throw new Error(`MFA setup verification failed for ${email}`);
+  }
+
+  // Handle SOFTWARE_TOKEN_MFA challenge (normal MFA)
+  if (data.challengeName === 'SOFTWARE_TOKEN_MFA' && data.session) {
+    if (!totpSecret) {
+      throw new Error(
+        `SOFTWARE_TOKEN_MFA challenge for ${email} but no TOTP secret. ` +
+          'Set SUPER_ADMIN_TOTP_SECRET or relevant env var.',
+      );
+    }
+    console.log(`[global-setup] SOFTWARE_TOKEN_MFA challenge for ${email}, generating TOTP...`);
+    const code = generateTotpCode(totpSecret);
+    const mfaResp = await fetch(`${apiBase}/auth/mfa-verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': UA },
+      body: JSON.stringify({
+        session: data.session,
+        mfaCode: code,
+        challengeName: 'SOFTWARE_TOKEN_MFA',
+      }),
+    });
+    if (!mfaResp.ok) {
+      throw new Error(`MFA verification failed for ${email}: ${mfaResp.status}`);
+    }
+    const mfaData = (await mfaResp.json()) as { accessToken?: string };
+    return mfaData.accessToken || '';
+  }
+
+  return data.idToken || '';
 }
 
 async function ensureTestAdmin(baseURL: string, superAdminToken: string): Promise<void> {
@@ -210,8 +294,9 @@ async function globalSetup(config: FullConfig): Promise<void> {
 
   if (superAdminEmail && superAdminPassword) {
     try {
+      const totpSecret = process.env.SUPER_ADMIN_TOTP_SECRET;
       console.log(`[global-setup] Logging in as super admin: ${superAdminEmail}`);
-      const token = await loginUser(baseURL, superAdminEmail, superAdminPassword);
+      const token = await loginUser(baseURL, superAdminEmail, superAdminPassword, totpSecret);
 
       if (token) {
         await ensureTestAdmin(baseURL, token);

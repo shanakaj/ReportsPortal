@@ -49,6 +49,12 @@ public class EmailService {
         sendEmail(toEmail, subject, htmlBody);
     }
 
+    public void sendPasswordResetNotification(String toEmail) {
+        String subject = "Your password has been reset";
+        String htmlBody = buildPasswordResetTemplate();
+        sendEmail(toEmail, subject, htmlBody);
+    }
+
     public void sendMfaResetNotification(String toEmail) {
         String subject = "Your MFA has been reset";
         String htmlBody = buildMfaResetTemplate();
@@ -124,6 +130,13 @@ public class EmailService {
                 "<p><strong>" + customerName + "</strong> has logged in for the first time to " +
                 "<strong>" + spaceName + "</strong>.</p>" +
                 "<p>The customer can now access reports in their assigned space.</p>");
+    }
+
+    private String buildPasswordResetTemplate() {
+        return buildEmailWrapper("Password Reset",
+                "<p>Your password has been reset by an administrator.</p>" +
+                "<p>You will receive a temporary password and will need to set a new password " +
+                "and configure MFA again on your next login.</p>");
     }
 
     private String buildMfaResetTemplate() {
