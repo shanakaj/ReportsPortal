@@ -666,20 +666,48 @@ In production, Cognito users (passwords, MFA), DynamoDB data, and S3 objects are
 
 ## Security Highlights
 
-- **Dual WAF protection** - CloudFront WAF (us-east-1) + API Gateway regional WAF (ap-southeast-2)
-- **WAF managed rules** - Core Rule Set, Known Bad Inputs, Bot Control (COUNT mode), IP Reputation, rate limiting, geo-restriction (AU only)
-- **Origin verification** - API Gateway WAF validates CloudFront origin header to prevent direct access
-- **Per-customer S3 bucket isolation** with KMS encryption
-- **CloudFront signed cookies** for report access (3-hour TTL)
-- **Cognito MFA enforced** (TOTP via authenticator app)
-- **JWT tokens** with 15-min access / 1-hour refresh expiry
+### Multi-Factor Authentication (MFA)
+
+Every user — Super Admin, Admin, and Customer — is required to enrol TOTP-based multi-factor authentication on first login. There are no exceptions and no option to skip.
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  Temporary   │────>│  Set New     │────>│  Scan QR &   │────>│  Dashboard   │
+│  Password    │     │  Password    │     │  Verify TOTP │     │  (MFA Done)  │
+│  (Email)     │     │  (12+ chars) │     │  (Auth App)  │     │              │
+└──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
+```
+
+- **Mandatory TOTP** — Cognito User Pool configured with `MFA: REQUIRED` and `SOFTWARE_TOKEN_MFA` as the only factor
+- **QR code enrollment** — Generated client-side using `qrcode.react`; no secret transmitted to external services
+- **Authenticator app support** — Google Authenticator, Authy, 1Password, Microsoft Authenticator, etc.
+- **Admin MFA reset** — Admins can reset a user's MFA enrollment, forcing re-setup on next login
+- **No SMS fallback** — TOTP-only eliminates SIM-swap attack vectors
+
+### Network & WAF Protection
+
+- **Dual WAF protection** — CloudFront WAF (us-east-1) + API Gateway regional WAF (ap-southeast-2)
+- **WAF managed rules** — Core Rule Set, Known Bad Inputs, Bot Control (COUNT mode), IP Reputation, rate limiting (1000 req/5min), geo-restriction (AU only)
+- **Origin verification** — API Gateway WAF validates a shared secret header injected by CloudFront, preventing direct API access that bypasses WAF/CDN controls
 - **Single CloudFront distribution** with path-based routing (`/`, `/api/*`, `/reports/*`)
 - **Content Security Policy** on both SPA and report-serving paths
+- **CORS** explicitly configured on API Gateway and CloudFront
+
+### Data Protection
+
+- **Per-customer S3 bucket isolation** with KMS encryption (customer-managed key, annual rotation)
+- **CloudFront signed cookies** for report access (3-hour TTL)
+- **Origin Access Control (OAC)** on all S3 buckets — no public access
 - **iframe sandboxing** for HTML reports
 - **HTML sanitization** on upload (OWASP Java HTML Sanitizer)
-- **CORS** explicitly configured on API Gateway and CloudFront
+
+### Identity & Access
+
+- **Cognito MFA enforced** (TOTP via authenticator app, no exceptions)
+- **JWT tokens** with 15-min access / 1-hour refresh expiry
+- **Invitation-only** — No self-registration; customers invited by admins to specific spaces
+- **Role-based access** — Three roles with fine-grained permissions, admin domain restriction (@versent.com.au)
 - **Audit logging** on all operations (2-year retention)
-- **Origin Access Control (OAC)** on all S3 buckets
 
 ## Authentication Flow
 

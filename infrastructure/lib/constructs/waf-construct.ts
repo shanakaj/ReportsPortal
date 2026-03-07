@@ -27,7 +27,7 @@ export class WafWebAcl extends Construct {
       rateLimit,
       allowedGeoLocations,
       cloudFrontHeaderName = 'x-origin-verify',
-      cloudFrontHeaderValue = cdk.Fn.select(2, cdk.Fn.split('/', cdk.Aws.STACK_ID)),
+      cloudFrontHeaderValue = 'must-be-provided-when-enableOriginHeaderValidation-is-true',
       enableOriginHeaderValidation = false,
     } = props;
 

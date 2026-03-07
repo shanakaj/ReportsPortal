@@ -12,8 +12,8 @@ let refreshTokenValue: string | null = null;
 let onTokenRefreshFailed: (() => void) | null = null;
 let refreshPromise: Promise<string> | null = null;
 
-export function setTokens(access: string, refresh: string): void {
-  accessToken = access;
+export function setTokens(idToken: string, refresh: string): void {
+  accessToken = idToken;
   refreshTokenValue = refresh;
 }
 
@@ -35,18 +35,17 @@ export function setOnTokenRefreshFailed(callback: () => void): void {
 }
 
 async function refreshAccessToken(): Promise<string> {
-  if (!refreshTokenValue) {
-    throw new Error('No refresh token available');
+  // Use the Cognito SDK to refresh the session client-side
+  // Dynamic import to avoid circular dependency
+  const { refreshSession } = await import('@/services/auth');
+  const tokens = await refreshSession();
+  if (!tokens) {
+    throw new Error('Session refresh failed');
   }
-
-  const response = await axios.post(
-    `${import.meta.env.VITE_API_BASE_URL || '/api'}/auth/refresh`,
-    { refreshToken: refreshTokenValue },
-  );
-
-  const { accessToken: newAccess, idToken: _idToken } = response.data;
-  accessToken = newAccess;
-  return newAccess;
+  // Store the new ID token for API calls
+  accessToken = tokens.idToken;
+  refreshTokenValue = tokens.refreshToken;
+  return tokens.idToken;
 }
 
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {

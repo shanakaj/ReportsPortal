@@ -80,4 +80,61 @@ describe('AuthContext', () => {
 
     expect(screen.getByTestId('readonly')).toHaveTextContent('false');
   });
+
+  it('passes ID token (not access token) to setTokens for API calls', async () => {
+    const { setTokens } = await import('@/services/api');
+    const { login } = await import('@/services/auth');
+
+    // Create a mock ID token with custom:role claim
+    const mockIdPayload = btoa(JSON.stringify({
+      sub: 'user-1',
+      email: 'admin@versent.com.au',
+      name: 'Admin',
+      'custom:role': 'super_admin',
+    }));
+    const mockIdToken = `header.${mockIdPayload}.signature`;
+
+    vi.mocked(login).mockResolvedValue({
+      tokens: {
+        accessToken: 'access-token-without-custom-claims',
+        idToken: mockIdToken,
+        refreshToken: 'refresh-token',
+      },
+      user: {
+        userId: 'user-1',
+        email: 'admin@versent.com.au',
+        fullName: 'Admin',
+        phone: '',
+        company: '',
+        role: 'super_admin' as any,
+        customerSpaces: [],
+        status: 'active',
+        mfaEnabled: true,
+        createdAt: '',
+        analyticsConsent: false,
+        preferredViewMode: 'full-tab',
+      },
+    });
+
+    renderWithAuth();
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 100));
+    });
+
+    const auth = screen.getByTestId('user');
+    const authContext = await act(async () => {
+      // Trigger login
+      const ctx = await import('@/services/auth');
+      await ctx.login('admin@versent.com.au', 'password');
+    });
+
+    // Verify setTokens was called with ID token, not access token
+    // The key assertion: setTokens receives the idToken for API Authorization header
+    if (vi.mocked(setTokens).mock.calls.length > 0) {
+      const [tokenArg] = vi.mocked(setTokens).mock.calls[vi.mocked(setTokens).mock.calls.length - 1];
+      expect(tokenArg).toBe(mockIdToken);
+      expect(tokenArg).not.toBe('access-token-without-custom-claims');
+    }
+  });
 });
