@@ -97,6 +97,56 @@ export async function login(email: string, password: string): Promise<LoginResul
           },
         });
       },
+      mfaSetup: () => {
+        resolve({
+          challenge: {
+            challengeName: 'MFA_SETUP',
+            session: '',
+          },
+        });
+      },
+    });
+  });
+}
+
+export async function associateTotpToken(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!currentCognitoUser) {
+      reject(new Error('No active auth session'));
+      return;
+    }
+
+    currentCognitoUser.associateSoftwareToken({
+      associateSecretCode: (secretCode: string) => {
+        resolve(secretCode);
+      },
+      onFailure: (err: Error) => {
+        reject(err);
+      },
+    });
+  });
+}
+
+export async function verifyTotpSetup(code: string): Promise<LoginResult> {
+  return new Promise((resolve, reject) => {
+    if (!currentCognitoUser) {
+      reject(new Error('No active auth session'));
+      return;
+    }
+
+    currentCognitoUser.verifySoftwareToken(code, 'TOTP', {
+      onSuccess: (session: CognitoUserSession) => {
+        const tokens: AuthTokens = {
+          accessToken: session.getAccessToken().getJwtToken(),
+          idToken: session.getIdToken().getJwtToken(),
+          refreshToken: session.getRefreshToken().getToken(),
+        };
+        const user = extractUserFromIdToken(tokens.idToken);
+        resolve({ tokens, user });
+      },
+      onFailure: (err: Error) => {
+        reject(err);
+      },
     });
   });
 }
@@ -163,6 +213,14 @@ export async function completeNewPassword(newPassword: string): Promise<LoginRes
         resolve({
           challenge: {
             challengeName: 'SMS_MFA',
+            session: '',
+          },
+        });
+      },
+      mfaSetup: () => {
+        resolve({
+          challenge: {
+            challengeName: 'MFA_SETUP',
             session: '',
           },
         });

@@ -14,6 +14,8 @@ export interface AuthContextValue {
   login: (email: string, password: string) => Promise<LoginResult>;
   verifyMfa: (code: string, mfaType: 'SOFTWARE_TOKEN_MFA' | 'SMS_MFA') => Promise<LoginResult>;
   completeNewPassword: (newPassword: string) => Promise<LoginResult>;
+  associateTotpToken: () => Promise<string>;
+  verifyTotpSetup: (code: string) => Promise<LoginResult>;
   logout: () => void;
   setAuthFromTokens: (tokens: AuthTokens) => void;
   clearChallenge: () => void;
@@ -93,6 +95,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [handleLoginResult],
   );
 
+  const associateTotpTokenFn = useCallback(async (): Promise<string> => {
+    return authService.associateTotpToken();
+  }, []);
+
+  const verifyTotpSetupFn = useCallback(
+    async (code: string): Promise<LoginResult> => {
+      const result = await authService.verifyTotpSetup(code);
+      return handleLoginResult(result);
+    },
+    [handleLoginResult],
+  );
+
   const logoutFn = useCallback(() => {
     authService.logout();
     clearTokens();
@@ -146,6 +160,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     login: loginFn,
     verifyMfa: verifyMfaFn,
     completeNewPassword: completeNewPasswordFn,
+    associateTotpToken: associateTotpTokenFn,
+    verifyTotpSetup: verifyTotpSetupFn,
     logout: logoutFn,
     setAuthFromTokens,
     clearChallenge,
