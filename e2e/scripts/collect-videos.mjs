@@ -29,6 +29,7 @@ const VIDEO_NAME_MAP = {
   '05-analytics-audit': '05-Analytics-Audit-Log',
   '06-user-management': '06-User-Management-Impersonation',
   '07-security-boundaries': '07-Security-Boundaries',
+  '08-admin-experience': '08-Admin-Experience',
 };
 
 function findVideos(dir, videos = []) {
