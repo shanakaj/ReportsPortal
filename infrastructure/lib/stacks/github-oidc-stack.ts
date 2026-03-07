@@ -64,7 +64,7 @@ export class GitHubOidcStack extends cdk.Stack {
         },
       ),
       maxSessionDuration: cdk.Duration.hours(1),
-      description: `Deploy role for GitHub Actions — ${props.githubOrg}/${props.githubRepo}`,
+      description: `Deploy role for GitHub Actions - ${props.githubOrg}/${props.githubRepo}`,
     });
 
     // Permissions needed for CDK deploy + frontend deploy
