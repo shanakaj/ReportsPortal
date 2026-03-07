@@ -194,6 +194,14 @@ public class AdminHandler {
         return ResponseEntity.noContent().build();
     }
 
+    @PutMapping("/users/{userId}/reset-password")
+    public ResponseEntity<java.util.Map<String, String>> resetPassword(@PathVariable String userId) {
+        roleChecker.requireAdmin();
+        roleChecker.requireNotReadOnly();
+        String tempPassword = userManagementService.resetPassword(userId);
+        return ResponseEntity.ok(java.util.Map.of("temporaryPassword", tempPassword));
+    }
+
     @PutMapping("/users/{userId}/reset-mfa")
     public ResponseEntity<Void> resetMfa(@PathVariable String userId) {
         roleChecker.requireAdmin();

@@ -6,6 +6,8 @@ import * as api from '../helpers/api';
  *
  * Each fixture logs in via the API (not UI) for speed, stores the tokens,
  * and injects them into the page context via localStorage/cookies before navigation.
+ *
+ * MFA is handled programmatically using TOTP secrets from env vars.
  */
 export interface AuthFixtures {
   // Tokens
@@ -30,11 +32,13 @@ async function loginAndGetToken(
   request: APIRequestContext,
   email: string,
   password: string,
+  totpSecret?: string,
 ): Promise<string> {
   try {
-    const response = await api.login(request, email, password);
+    const response = await api.loginWithMfa(request, email, password, totpSecret);
     return response.accessToken || response.idToken || '';
-  } catch {
+  } catch (err) {
+    console.warn(`[auth.fixture] Login failed for ${email}: ${err}`);
     return '';
   }
 }
@@ -54,21 +58,24 @@ export const test = base.extend<AuthFixtures>({
   superAdminToken: async ({ request }, use) => {
     const email = process.env.SUPER_ADMIN_EMAIL || 'superadmin@versent.com.au';
     const password = process.env.SUPER_ADMIN_PASSWORD || 'TestPassword123!';
-    const token = await loginAndGetToken(request, email, password);
+    const totpSecret = process.env.SUPER_ADMIN_TOTP_SECRET;
+    const token = await loginAndGetToken(request, email, password, totpSecret);
     await use(token);
   },
 
   adminToken: async ({ request }, use) => {
     const email = process.env.TEST_ADMIN_EMAIL || 'admin@versent.com.au';
     const password = process.env.TEST_ADMIN_PASSWORD || 'TestPassword123!';
-    const token = await loginAndGetToken(request, email, password);
+    const totpSecret = process.env.TEST_ADMIN_TOTP_SECRET;
+    const token = await loginAndGetToken(request, email, password, totpSecret);
     await use(token);
   },
 
   customerToken: async ({ request }, use) => {
     const email = process.env.TEST_CUSTOMER_EMAIL || 'customer@example.com';
     const password = process.env.TEST_CUSTOMER_PASSWORD || 'TestPassword123!';
-    const token = await loginAndGetToken(request, email, password);
+    const totpSecret = process.env.TEST_CUSTOMER_TOTP_SECRET;
+    const token = await loginAndGetToken(request, email, password, totpSecret);
     await use(token);
   },
 

@@ -23,6 +23,8 @@ import software.amazon.awssdk.services.cognitoidentityprovider.model.ChallengeNa
 import software.amazon.awssdk.services.cognitoidentityprovider.model.ChangePasswordRequest.Builder;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.ConfirmForgotPasswordRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.ForgotPasswordRequest;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.VerifySoftwareTokenRequest;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.VerifySoftwareTokenResponse;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -111,6 +113,11 @@ public class AuthService {
 
     public AuthResponse verifyMfa(MfaVerifyRequest request) {
         try {
+            // MFA_SETUP requires verifySoftwareToken instead of respondToAuthChallenge
+            if ("MFA_SETUP".equals(request.challengeName())) {
+                return completeMfaSetup(request.session(), request.mfaCode());
+            }
+
             Map<String, String> challengeResponses = new HashMap<>();
 
             ChallengeNameType challengeType = ChallengeNameType.fromValue(request.challengeName());
@@ -155,6 +162,46 @@ public class AuthService {
             log.error("MFA verification failed", e);
             throw new SecurityException("MFA verification failed: " + e.getMessage());
         }
+    }
+
+    private AuthResponse completeMfaSetup(String session, String totpCode) {
+        VerifySoftwareTokenResponse verifyResponse = cognitoClient.verifySoftwareToken(
+                VerifySoftwareTokenRequest.builder()
+                        .session(session)
+                        .userCode(totpCode)
+                        .friendlyDeviceName("ReportPortal-TOTP")
+                        .build());
+
+        String newSession = verifyResponse.session();
+
+        // After verifying the token, respond to the MFA_SETUP challenge to get auth tokens
+        Map<String, String> challengeResponses = new HashMap<>();
+        challengeResponses.put("USERNAME", "dummy");
+
+        AdminRespondToAuthChallengeResponse authResponse = cognitoClient.adminRespondToAuthChallenge(
+                AdminRespondToAuthChallengeRequest.builder()
+                        .userPoolId(userPoolId)
+                        .clientId(clientId)
+                        .challengeName(ChallengeNameType.MFA_SETUP)
+                        .session(newSession)
+                        .challengeResponses(challengeResponses)
+                        .build());
+
+        if (authResponse.authenticationResult() != null) {
+            AuthenticationResultType result = authResponse.authenticationResult();
+            return AuthResponse.tokens(
+                    result.accessToken(),
+                    result.idToken(),
+                    result.refreshToken(),
+                    result.expiresIn()
+            );
+        }
+
+        if (authResponse.challengeName() != null) {
+            return AuthResponse.challenge(authResponse.challengeNameAsString(), authResponse.session());
+        }
+
+        throw new SecurityException("Unexpected response after MFA setup verification");
     }
 
     public AuthResponse forgotPassword(PasswordResetRequest request) {

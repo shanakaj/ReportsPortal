@@ -31,6 +31,7 @@ import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminDisabl
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminEnableUserRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminDeleteUserRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminSetUserMfaPreferenceRequest;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminSetUserPasswordRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.SMSMfaSettingsType;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.SoftwareTokenMfaSettingsType;
 
@@ -258,6 +259,71 @@ public class UserManagementService {
 
         auditService.logEvent(currentUser.userId(), currentUser.email(),
                 "USER_DELETED", userId, "SUCCESS");
+    }
+
+    public String resetPassword(String userId) {
+        SecurityContext.AuthenticatedUser currentUser = SecurityContext.getCurrentUser();
+        UserEntity user = getUser(userId);
+
+        String tempPassword = generateTempPassword();
+
+        // Set temporary password (user must change on next login)
+        cognitoClient.adminSetUserPassword(AdminSetUserPasswordRequest.builder()
+                .userPoolId(userPoolId)
+                .username(user.getEmail())
+                .password(tempPassword)
+                .permanent(false)
+                .build());
+
+        // Also reset MFA so user can set up a new device after password change
+        cognitoClient.adminSetUserMFAPreference(AdminSetUserMfaPreferenceRequest.builder()
+                .userPoolId(userPoolId)
+                .username(user.getEmail())
+                .softwareTokenMfaSettings(SoftwareTokenMfaSettingsType.builder()
+                        .enabled(false)
+                        .preferredMfa(false)
+                        .build())
+                .smsMfaSettings(SMSMfaSettingsType.builder()
+                        .enabled(false)
+                        .preferredMfa(false)
+                        .build())
+                .build());
+
+        user.setMfaEnabled(false);
+        userTable.putItem(user);
+
+        emailService.sendPasswordResetNotification(user.getEmail());
+
+        auditService.logEvent(currentUser.userId(), currentUser.email(),
+                "PASSWORD_RESET_BY_ADMIN", userId, "SUCCESS");
+
+        log.info("Password and MFA reset for user: {} by admin: {}", userId, currentUser.email());
+        return tempPassword;
+    }
+
+    private String generateTempPassword() {
+        String upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        String lower = "abcdefghijklmnopqrstuvwxyz";
+        String digits = "0123456789";
+        String special = "!@#$%^&*";
+        java.security.SecureRandom random = new java.security.SecureRandom();
+        StringBuilder sb = new StringBuilder(16);
+        sb.append(upper.charAt(random.nextInt(upper.length())));
+        sb.append(lower.charAt(random.nextInt(lower.length())));
+        sb.append(digits.charAt(random.nextInt(digits.length())));
+        sb.append(special.charAt(random.nextInt(special.length())));
+        String all = upper + lower + digits + special;
+        for (int i = 4; i < 16; i++) {
+            sb.append(all.charAt(random.nextInt(all.length())));
+        }
+        char[] chars = sb.toString().toCharArray();
+        for (int i = chars.length - 1; i > 0; i--) {
+            int j = random.nextInt(i + 1);
+            char tmp = chars[i];
+            chars[i] = chars[j];
+            chars[j] = tmp;
+        }
+        return new String(chars);
     }
 
     public void resetMfa(String userId) {

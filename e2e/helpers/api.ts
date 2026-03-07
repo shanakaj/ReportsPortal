@@ -1,4 +1,5 @@
 import { APIRequestContext } from '@playwright/test';
+import { generateTotpCode } from './totp';
 
 const API_BASE = process.env.API_BASE_URL || process.env.BASE_URL || 'http://localhost:5173';
 
@@ -93,6 +94,120 @@ export async function verifyMfa(
   }
 
   return response.json() as Promise<LoginResponse>;
+}
+
+/**
+ * Login with full MFA support. Handles:
+ * - Direct token response (no MFA challenge)
+ * - SOFTWARE_TOKEN_MFA challenge (uses stored TOTP secret)
+ * - MFA_SETUP challenge (associates new TOTP device, returns tokens + new secret)
+ * - NEW_PASSWORD_REQUIRED challenge (sets new password, then handles MFA)
+ */
+export async function loginWithMfa(
+  request: APIRequestContext,
+  email: string,
+  password: string,
+  totpSecret?: string,
+): Promise<LoginResponse & { totpSecret?: string }> {
+  const loginResponse = await login(request, email, password);
+
+  // Direct tokens - no MFA challenge
+  if (loginResponse.accessToken) {
+    return loginResponse;
+  }
+
+  if (!loginResponse.challengeName || !loginResponse.session) {
+    throw new Error(`Unexpected login response for ${email}: no tokens and no challenge`);
+  }
+
+  // Handle NEW_PASSWORD_REQUIRED (first login after admin reset)
+  if (loginResponse.challengeName === 'NEW_PASSWORD_REQUIRED') {
+    const firstLoginResp = await request.post(`${API_BASE}/auth/first-login`, {
+      data: { session: loginResponse.session, newPassword: password },
+    });
+    if (!firstLoginResp.ok()) {
+      throw new Error(`First login failed: ${firstLoginResp.status()} ${firstLoginResp.statusText()}`);
+    }
+    const firstLoginData = (await firstLoginResp.json()) as LoginResponse;
+
+    // After password change, may get MFA_SETUP
+    if (firstLoginData.challengeName === 'MFA_SETUP' && firstLoginData.secretCode) {
+      return completeMfaSetup(request, firstLoginData.session!, firstLoginData.secretCode);
+    }
+    if (firstLoginData.accessToken) {
+      return firstLoginData;
+    }
+    // Might get SOFTWARE_TOKEN_MFA if MFA was already set up
+    if (firstLoginData.challengeName === 'SOFTWARE_TOKEN_MFA' && totpSecret) {
+      const code = generateTotpCode(totpSecret);
+      const mfaResp = await verifyMfa(request, firstLoginData.session!, code, email);
+      return { ...mfaResp, totpSecret };
+    }
+    throw new Error(`Unhandled challenge after first-login: ${firstLoginData.challengeName}`);
+  }
+
+  // Handle MFA_SETUP (first time setting up TOTP)
+  if (loginResponse.challengeName === 'MFA_SETUP') {
+    const secretCode = (loginResponse as LoginResponse & { secretCode?: string }).secretCode;
+    if (!secretCode) {
+      throw new Error('MFA_SETUP challenge but no secretCode returned');
+    }
+    return completeMfaSetup(request, loginResponse.session, secretCode);
+  }
+
+  // Handle SOFTWARE_TOKEN_MFA (normal MFA verification)
+  if (loginResponse.challengeName === 'SOFTWARE_TOKEN_MFA') {
+    if (!totpSecret) {
+      throw new Error(
+        `SOFTWARE_TOKEN_MFA challenge for ${email} but no TOTP secret provided. ` +
+          'Set the TOTP secret env var for this user.',
+      );
+    }
+    const code = generateTotpCode(totpSecret);
+    const mfaResp = await verifyMfa(request, loginResponse.session, code, email);
+    return { ...mfaResp, totpSecret };
+  }
+
+  throw new Error(`Unhandled auth challenge: ${loginResponse.challengeName}`);
+}
+
+/**
+ * Complete MFA setup by verifying a TOTP code generated from the new secret.
+ */
+async function completeMfaSetup(
+  request: APIRequestContext,
+  session: string,
+  secretCode: string,
+): Promise<LoginResponse & { totpSecret: string }> {
+  const code = generateTotpCode(secretCode);
+  // Verify the software token to complete MFA setup
+  const verifyResp = await request.post(`${API_BASE}/auth/mfa-verify`, {
+    data: { session, mfaCode: code, challengeName: 'MFA_SETUP' },
+  });
+
+  if (!verifyResp.ok()) {
+    // MFA_SETUP verify might return a SOFTWARE_TOKEN_MFA challenge
+    // Try with SOFTWARE_TOKEN_MFA challenge name
+    const retryResp = await request.post(`${API_BASE}/auth/mfa-verify`, {
+      data: { session, mfaCode: code, challengeName: 'SOFTWARE_TOKEN_MFA' },
+    });
+    if (!retryResp.ok()) {
+      throw new Error(`MFA setup verification failed: ${retryResp.status()}`);
+    }
+    const retryData = (await retryResp.json()) as LoginResponse;
+    return { ...retryData, totpSecret: secretCode };
+  }
+
+  const verifyData = (await verifyResp.json()) as LoginResponse;
+
+  // May still need one more SOFTWARE_TOKEN_MFA challenge
+  if (verifyData.challengeName === 'SOFTWARE_TOKEN_MFA' && verifyData.session) {
+    const finalCode = generateTotpCode(secretCode);
+    const finalResp = await verifyMfa(request, verifyData.session, finalCode, '');
+    return { ...finalResp, totpSecret: secretCode };
+  }
+
+  return { ...verifyData, totpSecret: secretCode };
 }
 
 /**
