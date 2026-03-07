@@ -243,26 +243,22 @@ flowchart TD
 
     subgraph CI["── CI ── Continuous Integration (ci.yml)"]
         direction LR
-        BE_CI["🔧 Backend\n─────────\nmvn compile\nJUnit 5 tests\n40+ unit tests"]
+        BE_CI["🔧 Backend\n─────────\nmvn clean package\nJUnit 5 tests (40+)\nProduces Lambda JARs"]
         FE_CI["🎨 Frontend\n─────────\nnpm run lint\nVitest tests\nnpm run build"]
         INFRA_CI["☁️ Infrastructure\n─────────\ntsc compile\nJest CDK assertions\n50+ snapshot tests"]
     end
 
     subgraph CD["── CD ── Continuous Deployment (deploy.yml)"]
         direction TB
-        BE_BUILD["1️⃣ Package Backend\n─────────\nmvn clean package\nProduces Lambda JARs"]
-
-        BE_BUILD --> CDK_DEPLOY
-
-        CDK_DEPLOY["2️⃣ Deploy Infrastructure\n─────────\ncdk synth → validate templates\ncdk deploy → create/update stacks\nOutputs: Cognito Pool ID,\nClient ID, CloudFront domain"]
+        CDK_DEPLOY["1️⃣ Deploy Infrastructure\n─────────\nmvn package (Lambda JARs)\ncdk synth → validate templates\ncdk deploy → create/update stacks\nOutputs: Cognito Pool ID,\nClient ID, CloudFront domain"]
 
         CDK_DEPLOY --> FE_BUILD
 
-        FE_BUILD["3️⃣ Build Frontend\n─────────\nGenerate .env.production\nwith real values from step 2\nnpm run build"]
+        FE_BUILD["2️⃣ Build Frontend\n─────────\nGenerate .env.production\nwith real values from step 1\nnpm run build"]
 
         FE_BUILD --> FE_DEPLOY
 
-        FE_DEPLOY["4️⃣ Deploy Frontend\n─────────\naws s3 sync → S3 bucket\nCloudFront cache invalidation"]
+        FE_DEPLOY["3️⃣ Deploy Frontend\n─────────\naws s3 sync → S3 bucket\nCloudFront cache invalidation"]
     end
 
     subgraph VERIFY["── Verify ── Post-Deploy (parallel)"]
@@ -280,7 +276,7 @@ flowchart TD
 
     class PR,MERGE,MANUAL trigger
     class BE_CI,FE_CI,INFRA_CI ci
-    class BE_BUILD,CDK_DEPLOY,FE_BUILD,FE_DEPLOY cd
+    class CDK_DEPLOY,FE_BUILD,FE_DEPLOY cd
     class API_TEST,E2E_TEST verify
 ```
 
@@ -289,7 +285,7 @@ flowchart TD
 | Workflow | Trigger | Stage | Purpose |
 |----------|---------|-------|---------|
 | `ci.yml` | PR + push to `main` | **CI** | Lint, test, build — fast feedback on every change |
-| `deploy.yml` | Manual (`workflow_dispatch`) | **CD** | Build → Deploy infra → Build frontend → Deploy to S3 |
+| `deploy.yml` | Manual (`workflow_dispatch`) | **CD** | Deploy infra → Build frontend (with real env) → Deploy to S3 |
 | `api-tests.yml` | Post-deploy or manual | **Verify** | API smoke tests (no browser needed) |
 | `e2e-tests.yml` | Post-deploy or manual | **Verify** | Playwright E2E tests with browser |
 
