@@ -237,8 +237,9 @@ All CI/CD runs through GitHub Actions. No local deployment scripts are needed �
 
 ```mermaid
 flowchart TD
-    PR["Pull Request / Push to main"] --> CI
-    MANUAL["Manual Trigger\n(workflow_dispatch)"] --> CD
+    PR["Feature Branch\nPull Request"] -->|"runs on every PR"| CI
+    MERGE["Merge to main"] -->|"runs on push to main"| CI
+    MANUAL["main branch\nManual Trigger\n(workflow_dispatch)"] -->|"deploys from main"| CD
 
     subgraph CI["── CI ── Continuous Integration (ci.yml)"]
         direction LR
@@ -277,7 +278,7 @@ flowchart TD
     classDef cd fill:#ff9900,stroke:#cc7a00,color:#fff
     classDef verify fill:#3b48cc,stroke:#2a35a0,color:#fff
 
-    class PR,MANUAL trigger
+    class PR,MERGE,MANUAL trigger
     class BE_CI,FE_CI,INFRA_CI ci
     class BE_BUILD,CDK_DEPLOY,FE_BUILD,FE_DEPLOY cd
     class API_TEST,E2E_TEST verify
