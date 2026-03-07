@@ -34,9 +34,19 @@ on:
     secrets:
       AWS_DEPLOY_ROLE_ARN:
         required: false
-      E2E_ADMIN_EMAIL:
+      SUPER_ADMIN_EMAIL:
         required: false
-      E2E_ADMIN_PASSWORD:
+      SUPER_ADMIN_PASSWORD:
+        required: false
+      SUPER_ADMIN_TOTP_SECRET:
+        required: false
+      TEST_ADMIN_EMAIL:
+        required: false
+      TEST_ADMIN_PASSWORD:
+        required: false
+      TEST_CUSTOMER_EMAIL:
+        required: false
+      TEST_CUSTOMER_PASSWORD:
         required: false
 
 permissions:
@@ -50,6 +60,7 @@ jobs:
   e2e-tests:
     name: E2E Tests (${{ inputs.environment }}, ${{ inputs.browser || 'chromium' }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: ${{ inputs.environment }}
     steps:
       - uses: actions/checkout@v4
@@ -98,8 +109,14 @@ jobs:
         working-directory: e2e
         env:
           BASE_URL: ${{ steps.get-url.outputs.base_url }}
-          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
-          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+          API_BASE_URL: ${{ steps.get-url.outputs.base_url }}/api
+          SUPER_ADMIN_EMAIL: ${{ secrets.SUPER_ADMIN_EMAIL }}
+          SUPER_ADMIN_PASSWORD: ${{ secrets.SUPER_ADMIN_PASSWORD }}
+          SUPER_ADMIN_TOTP_SECRET: ${{ secrets.SUPER_ADMIN_TOTP_SECRET }}
+          TEST_ADMIN_EMAIL: ${{ secrets.TEST_ADMIN_EMAIL }}
+          TEST_ADMIN_PASSWORD: ${{ secrets.TEST_ADMIN_PASSWORD }}
+          TEST_CUSTOMER_EMAIL: ${{ secrets.TEST_CUSTOMER_EMAIL }}
+          TEST_CUSTOMER_PASSWORD: ${{ secrets.TEST_CUSTOMER_PASSWORD }}
           CI: true
         run: |
           BROWSER_PROJECT="${{ inputs.browser || 'chromium' }}"
