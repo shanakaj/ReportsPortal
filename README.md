@@ -237,9 +237,18 @@ All CI/CD runs through GitHub Actions. No local deployment scripts are needed â€
 
 ```mermaid
 flowchart TD
-    PR["Feature Branch PR"] -->|"every PR"| CI
-    MERGE["Push to main"] -->|"on merge"| CI
-    MANUAL["Manual Trigger"] -->|"from main"| CD
+    subgraph FEATURE["Feature Branch"]
+        PR["PR to main"]
+    end
+
+    subgraph MAIN["main Branch"]
+        MERGE["Push / Merge"]
+        MANUAL["Manual Trigger"]
+    end
+
+    PR -->|"CI only"| CI
+    MERGE -->|"CI only"| CI
+    MANUAL -->|"CD"| CD
 
     subgraph CI["CI - Continuous Integration (ci.yml)"]
         direction LR
@@ -265,12 +274,14 @@ flowchart TD
 
     FE_DEPLOY --> API_TEST & E2E_TEST
 
-    classDef trigger fill:#f5f5f5,stroke:#666,color:#333
+    classDef branch fill:#f5f5f5,stroke:#666,color:#333
+    classDef mainBranch fill:#e6f0ff,stroke:#4a86c8,color:#333
     classDef ci fill:#2ea44f,stroke:#1a7f37,color:#fff
     classDef cd fill:#ff9900,stroke:#cc7a00,color:#fff
     classDef verify fill:#3b48cc,stroke:#2a35a0,color:#fff
 
-    class PR,MERGE,MANUAL trigger
+    class PR branch
+    class MERGE,MANUAL mainBranch
     class BE_CI,FE_CI,INFRA_CI ci
     class CDK_DEPLOY,FE_BUILD,FE_DEPLOY cd
     class API_TEST,E2E_TEST verify
