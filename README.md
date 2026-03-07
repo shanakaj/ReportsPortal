@@ -2,6 +2,58 @@
 
 A security-first, multi-tenant AWS serverless application for delivering HTML reports to customers. Each customer has an isolated space with a dedicated S3 bucket. Reports are served via CloudFront with signed cookies, authenticated through API Gateway + Cognito.
 
+## What It Does
+
+Secure Report Portal enables consultancies and service providers to securely deliver HTML-based reports (assessments, audits, reviews) to their customers through a branded, self-service web portal.
+
+### The Problem
+
+Delivering sensitive reports to customers typically involves emailing attachments, sharing links to shared drives, or using generic file-sharing tools. These approaches lack access control, audit trails, and professional presentation.
+
+### The Solution
+
+Report Portal provides a dedicated, secure channel where:
+
+- **Admins** (the service provider) create isolated customer spaces, upload HTML reports, and invite customers
+- **Customers** log in with MFA, browse their reports in a clean portal, and provide feedback directly within the platform
+- **Super Admins** manage the entire platform, invite other admins, and monitor usage via analytics and audit logs
+
+### Key Business Capabilities
+
+| Capability | Description |
+|-----------|-------------|
+| **Customer Spaces** | Each customer gets an isolated space with its own S3 bucket. No cross-customer data leakage is possible. |
+| **Report Delivery** | Upload HTML reports (with embedded charts, tables, Mermaid diagrams) that customers view in a sandboxed iframe. |
+| **Invitation-Only Access** | No self-registration. Admins invite customers by email; invitations expire after 24 hours. |
+| **MFA-Enforced Login** | Every user must set up TOTP (authenticator app) on first login. No exceptions. |
+| **Feedback System** | Customers can submit feedback on reports with file attachments. Admins receive email + in-app notifications. Threaded conversations with status tracking (open/in-progress/resolved). |
+| **Audit Trail** | Every action (login, report view, upload, user change) is logged with 2-year retention. |
+| **Analytics** | Track report views, active users, and engagement per space. Export analytics data for reporting. |
+| **Impersonation** | Super admins can impersonate customers (read-only) for support and troubleshooting. |
+| **Role-Based Access** | Three roles (Super Admin, Admin, Customer) with fine-grained permissions. Admins are scoped to their assigned spaces. |
+
+### Typical Workflow
+
+```
+1. Super Admin creates a customer space (e.g., "acme-corp")
+   --> Provisions isolated S3 bucket for report storage
+
+2. Admin uploads HTML report to the space
+   --> Report is sanitized, stored in S3, metadata saved to DynamoDB
+
+3. Admin invites customer (e.g., john@acme.com) to the space
+   --> Customer receives email with 24-hour invitation link
+
+4. Customer accepts invitation
+   --> Sets password, configures TOTP MFA via authenticator app
+
+5. Customer logs in and views reports
+   --> CloudFront signed cookies grant time-limited access to report files
+
+6. Customer submits feedback on a report
+   --> Admin receives email notification, replies in threaded conversation
+```
+
 ## Architecture
 
 ### End-to-End System Architecture
