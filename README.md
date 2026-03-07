@@ -237,34 +237,30 @@ All CI/CD runs through GitHub Actions. No local deployment scripts are needed �
 
 ```mermaid
 flowchart TD
-    PR["Feature Branch\nPull Request"] -->|"runs on every PR"| CI
-    MERGE["Merge to main"] -->|"runs on push to main"| CI
-    MANUAL["main branch\nManual Trigger\n(workflow_dispatch)"] -->|"deploys from main"| CD
+    PR["Feature Branch PR"] -->|"every PR"| CI
+    MERGE["Push to main"] -->|"on merge"| CI
+    MANUAL["Manual Trigger"] -->|"from main"| CD
 
-    subgraph CI["── CI ── Continuous Integration (ci.yml)"]
+    subgraph CI["CI - Continuous Integration (ci.yml)"]
         direction LR
-        BE_CI["🔧 Backend\n─────────\nmvn clean package\nJUnit 5 tests (40+)\nProduces Lambda JARs"]
-        FE_CI["🎨 Frontend\n─────────\nnpm run lint\nVitest tests\nnpm run build"]
-        INFRA_CI["☁️ Infrastructure\n─────────\ntsc compile\nJest CDK assertions\n50+ snapshot tests"]
+        BE_CI["Backend\nmvn package + JUnit 5\n40+ unit tests"]
+        FE_CI["Frontend\nESLint + Vitest + build"]
+        INFRA_CI["Infrastructure\nCDK compile + Jest\n50+ assertions"]
     end
 
-    subgraph CD["── CD ── Continuous Deployment (deploy.yml)"]
+    subgraph CD["CD - Continuous Deployment (deploy.yml)"]
         direction TB
-        CDK_DEPLOY["1️⃣ Deploy Infrastructure\n─────────\nmvn package (Lambda JARs)\ncdk synth → validate templates\ncdk deploy → create/update stacks\nOutputs: Cognito Pool ID,\nClient ID, CloudFront domain"]
-
-        CDK_DEPLOY --> FE_BUILD
-
-        FE_BUILD["2️⃣ Build Frontend\n─────────\nGenerate .env.production\nwith real values from step 1\nnpm run build"]
-
+        CDK_DEPLOY["1. Deploy Infra\nBuild Lambda JARs\nCDK deploy all stacks"]
+        CDK_DEPLOY -->|"Cognito IDs\nCloudFront domain"| FE_BUILD
+        FE_BUILD["2. Build Frontend\nInject env from CDK outputs\nnpm run build"]
         FE_BUILD --> FE_DEPLOY
-
-        FE_DEPLOY["3️⃣ Deploy Frontend\n─────────\naws s3 sync → S3 bucket\nCloudFront cache invalidation"]
+        FE_DEPLOY["3. Ship Frontend\nS3 sync + CF invalidation"]
     end
 
-    subgraph VERIFY["── Verify ── Post-Deploy (parallel)"]
+    subgraph VERIFY["Verify - Post-Deploy"]
         direction LR
-        API_TEST["🧪 API Smoke Tests\n(api-tests.yml)\n─────────\nSPA reachable\nSecurity headers\nAuth endpoints\nProtected 401s\nWAF validation"]
-        E2E_TEST["🎭 E2E Tests\n(e2e-tests.yml)\n─────────\nPlaywright browser tests\nAuth + MFA flows\nRole-based access\nReport viewing\nFeedback lifecycle"]
+        API_TEST["API Smoke Tests\nHeaders, auth, WAF"]
+        E2E_TEST["Playwright E2E\n7 scenarios, MFA, RBAC"]
     end
 
     FE_DEPLOY --> API_TEST & E2E_TEST
