@@ -237,54 +237,70 @@ All CI/CD runs through GitHub Actions. No local deployment scripts are needed �
 
 ```mermaid
 flowchart TD
-    subgraph CI["CI Pipeline (ci.yml)\nRuns on: PR + push to main"]
-        FE_CI["Frontend\nLint + Test + Build"]
-        BE_CI["Backend\nMaven Build + Test"]
-        INFRA_CI["Infrastructure\nCDK Compile + Jest"]
+    PR["Pull Request / Push to main"] --> CI
+    MANUAL["Manual Trigger\n(workflow_dispatch)"] --> CD
+
+    subgraph CI["── CI ── Continuous Integration (ci.yml)"]
+        direction LR
+        BE_CI["🔧 Backend\n─────────\nmvn compile\nJUnit 5 tests\n40+ unit tests"]
+        FE_CI["🎨 Frontend\n─────────\nnpm run lint\nVitest tests\nnpm run build"]
+        INFRA_CI["☁️ Infrastructure\n─────────\ntsc compile\nJest CDK assertions\n50+ snapshot tests"]
     end
 
-    subgraph CD["CD Pipeline (deploy.yml)\nRuns on: manual trigger"]
-        BE_BUILD["Build Backend\nMaven package"] --> CDK["Deploy Infrastructure\nCDK synth + deploy"]
-        CDK -->|"Outputs: Cognito IDs\nCloudFront domain"| FE_BUILD["Build Frontend\nInject .env.production\nnpm build"]
-        FE_BUILD --> DEPLOY["Deploy Frontend\nS3 sync + CF invalidation"]
+    subgraph CD["── CD ── Continuous Deployment (deploy.yml)"]
+        direction TB
+        BE_BUILD["1️⃣ Package Backend\n─────────\nmvn clean package\nProduces Lambda JARs"]
+
+        BE_BUILD --> CDK_DEPLOY
+
+        CDK_DEPLOY["2️⃣ Deploy Infrastructure\n─────────\ncdk synth → validate templates\ncdk deploy → create/update stacks\nOutputs: Cognito Pool ID,\nClient ID, CloudFront domain"]
+
+        CDK_DEPLOY --> FE_BUILD
+
+        FE_BUILD["3️⃣ Build Frontend\n─────────\nGenerate .env.production\nwith real values from step 2\nnpm run build"]
+
+        FE_BUILD --> FE_DEPLOY
+
+        FE_DEPLOY["4️⃣ Deploy Frontend\n─────────\naws s3 sync → S3 bucket\nCloudFront cache invalidation"]
     end
 
-    subgraph Tests["Post-Deploy Verification"]
-        API_TEST["API Smoke Tests\n(api-tests.yml)"]
-        E2E_TEST["E2E Tests\n(e2e-tests.yml)\nPlaywright"]
+    subgraph VERIFY["── Verify ── Post-Deploy (parallel)"]
+        direction LR
+        API_TEST["🧪 API Smoke Tests\n(api-tests.yml)\n─────────\nSPA reachable\nSecurity headers\nAuth endpoints\nProtected 401s\nWAF validation"]
+        E2E_TEST["🎭 E2E Tests\n(e2e-tests.yml)\n─────────\nPlaywright browser tests\nAuth + MFA flows\nRole-based access\nReport viewing\nFeedback lifecycle"]
     end
 
-    DEPLOY --> API_TEST & E2E_TEST
+    FE_DEPLOY --> API_TEST & E2E_TEST
 
-    classDef ci fill:#2ea44f,stroke:#232f3e,color:#fff
-    classDef cd fill:#ff9900,stroke:#232f3e,color:#fff
-    classDef test fill:#3b48cc,stroke:#232f3e,color:#fff
+    classDef trigger fill:#f5f5f5,stroke:#666,color:#333
+    classDef ci fill:#2ea44f,stroke:#1a7f37,color:#fff
+    classDef cd fill:#ff9900,stroke:#cc7a00,color:#fff
+    classDef verify fill:#3b48cc,stroke:#2a35a0,color:#fff
 
-    class FE_CI,BE_CI,INFRA_CI ci
-    class BE_BUILD,CDK,FE_BUILD,DEPLOY cd
-    class API_TEST,E2E_TEST test
+    class PR,MANUAL trigger
+    class BE_CI,FE_CI,INFRA_CI ci
+    class BE_BUILD,CDK_DEPLOY,FE_BUILD,FE_DEPLOY cd
+    class API_TEST,E2E_TEST verify
 ```
 
 ### Workflows
 
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| `ci.yml` | PR + push to `main` | Lint, test, build (frontend, backend, infra) |
-| `deploy.yml` | Manual (`workflow_dispatch`) | Full deploy: backend -> CDK -> frontend -> S3 -> tests |
-| `api-tests.yml` | Manual or post-deploy | API smoke tests (no browser needed) |
-| `e2e-tests.yml` | Manual or post-deploy | Playwright E2E tests with browser |
+| Workflow | Trigger | Stage | Purpose |
+|----------|---------|-------|---------|
+| `ci.yml` | PR + push to `main` | **CI** | Lint, test, build — fast feedback on every change |
+| `deploy.yml` | Manual (`workflow_dispatch`) | **CD** | Build → Deploy infra → Build frontend → Deploy to S3 |
+| `api-tests.yml` | Post-deploy or manual | **Verify** | API smoke tests (no browser needed) |
+| `e2e-tests.yml` | Post-deploy or manual | **Verify** | Playwright E2E tests with browser |
 
-### CD Pipeline Detail
+### Why Frontend Builds After CDK Deploy
 
-The deploy pipeline solves the **chicken-and-egg problem**: the frontend needs Cognito and CloudFront values that only exist after CDK deploys. The pipeline:
+The deploy pipeline solves a **chicken-and-egg problem**: the frontend needs Cognito and CloudFront values that only exist after CDK deploys.
 
-1. **Build Backend** — Maven packages Lambda JARs
-2. **Deploy Infrastructure** — CDK synth (validates) + deploy (creates/updates stacks). Extracts outputs: Cognito Pool ID, Client ID, CloudFront domain
-3. **Build Frontend** — Generates `.env.production` with real values from step 2, then builds
-4. **Deploy Frontend** — Syncs to S3, invalidates CloudFront
-5. **Post-Deploy Tests** — API smoke tests + E2E tests run in parallel
+```
+CDK Deploy → extracts outputs → generates .env.production → frontend build uses real values
+```
 
-The `skip_infra` option skips CDK deploy and looks up existing values from CloudFormation stacks (for frontend-only deploys).
+The `skip_infra` flag skips CDK deploy and looks up existing values from CloudFormation stacks — useful for frontend-only deploys.
 
 ### First-Time CI/CD Setup
 
