@@ -41,7 +41,7 @@ public class SignedCookieService {
         Instant expiresAt = Instant.now().plus(COOKIE_TTL_HOURS, ChronoUnit.HOURS);
         long epochSeconds = expiresAt.getEpochSecond();
 
-        String resourcePath = "https://" + cloudFrontDomain + "/report-portal-" + spaceId + "/*";
+        String resourcePath = "https://" + cloudFrontDomain + "/reports/report-portal-" + spaceId + "/*";
 
         String policy = String.format(
                 "{\"Statement\":[{\"Resource\":\"%s\",\"Condition\":{\"DateLessThan\":{\"AWS:EpochTime\":%d}}}]}",
