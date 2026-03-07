@@ -1,0 +1,123 @@
+name: E2E Tests
+
+on:
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment to test
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      browser:
+        description: Browser to test with
+        required: false
+        type: choice
+        options:
+          - chromium
+          - all
+        default: chromium
+
+  # Callable from other workflows (e.g., deploy.yml)
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      browser:
+        required: false
+        type: string
+        default: chromium
+    secrets:
+      AWS_DEPLOY_ROLE_ARN:
+        required: false
+      E2E_ADMIN_EMAIL:
+        required: false
+      E2E_ADMIN_PASSWORD:
+        required: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-southeast-2
+
+jobs:
+  e2e-tests:
+    name: E2E Tests (${{ inputs.environment }}, ${{ inputs.browser || 'chromium' }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN || vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get CloudFront domain
+        id: get-url
+        run: |
+          STACK_PREFIX="ReportPortal-${{ inputs.environment }}"
+          CF_DOMAIN=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_PREFIX}-Frontend" \
+            --query "Stacks[0].Outputs[?OutputKey=='PortalDistributionDomain'].OutputValue" \
+            --output text)
+          echo "base_url=https://${CF_DOMAIN}" >> "$GITHUB_OUTPUT"
+          echo "Testing against: https://${CF_DOMAIN}"
+
+      - name: Install dependencies
+        working-directory: e2e
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: e2e
+        run: npx playwright install --with-deps ${{ inputs.browser == 'all' && '' || inputs.browser || 'chromium' }}
+
+      - name: Run E2E tests
+        working-directory: e2e
+        env:
+          BASE_URL: ${{ steps.get-url.outputs.base_url }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+          CI: true
+        run: |
+          BROWSER_PROJECT="${{ inputs.browser || 'chromium' }}"
+          if [ "$BROWSER_PROJECT" == "all" ]; then
+            npx playwright test
+          else
+            npx playwright test --project="$BROWSER_PROJECT"
+          fi
+
+      - name: Upload test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-${{ inputs.environment }}-${{ inputs.browser || 'chromium' }}
+          path: e2e/playwright-report/
+          retention-days: 14
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ inputs.environment }}-${{ inputs.browser || 'chromium' }}
+          path: e2e/test-results/
+          retention-days: 7
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### E2E Test Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Base URL:** ${{ steps.get-url.outputs.base_url }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Browser:** ${{ inputs.browser || 'chromium' }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Status:** ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"

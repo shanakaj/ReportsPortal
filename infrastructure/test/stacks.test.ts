@@ -148,14 +148,13 @@ describe('SecurityStack - WAF Rules', () => {
     });
   });
 
-  test('WAF has CloudFront header validation rule', () => {
+  test('WAF does not have CloudFront header validation rule (only for Regional WAF)', () => {
     template.hasResourceProperties('AWS::WAFv2::WebACL', {
-      Rules: Match.arrayWith([
+      Rules: Match.not(Match.arrayWith([
         Match.objectLike({
           Name: 'CloudFrontHeaderValidation',
-          Action: { Block: {} },
         }),
-      ]),
+      ])),
     });
   });
 });

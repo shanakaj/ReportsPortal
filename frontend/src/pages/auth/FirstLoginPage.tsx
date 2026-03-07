@@ -17,11 +17,12 @@ export function FirstLoginPage() {
     setError(null);
     try {
       const result = await completeNewPassword(newPassword);
-      if (result.tokens && result.user) {
+      if (result.challenge?.challengeName === 'MFA_SETUP') {
+        navigate('/mfa-setup');
+      } else if (result.tokens && result.user) {
         const target = result.user.role === Role.CUSTOMER ? '/customer' : '/admin';
         navigate(target);
       }
-      // If challenge (MFA), the state will update via context
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to set password.');
     } finally {

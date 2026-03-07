@@ -6,6 +6,7 @@ import { CustomerLayout } from '@/components/layout/CustomerLayout';
 import { LoginPage } from '@/pages/auth/LoginPage';
 import { FirstLoginPage } from '@/pages/auth/FirstLoginPage';
 import { ForgotPasswordPage } from '@/pages/auth/ForgotPasswordPage';
+import { MfaSetupPage } from '@/pages/auth/MfaSetupPage';
 import { DashboardPage } from '@/pages/admin/DashboardPage';
 import { SpacesPage } from '@/pages/admin/SpacesPage';
 import { SpaceDetailPage } from '@/pages/admin/SpaceDetailPage';
@@ -38,6 +39,7 @@ function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/first-login" element={<FirstLoginPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/mfa-setup" element={<MfaSetupPage />} />
 
       {/* Full-tab report view (shared route, auth checked inside) */}
       <Route

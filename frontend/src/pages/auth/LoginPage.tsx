@@ -26,6 +26,8 @@ export function LoginPage() {
       const result = await login(email, password);
       if (result.challenge?.challengeName === 'NEW_PASSWORD_REQUIRED') {
         navigate('/first-login');
+      } else if (result.challenge?.challengeName === 'MFA_SETUP') {
+        navigate('/mfa-setup');
       } else if (result.tokens && result.user) {
         const target = result.user.role === Role.CUSTOMER ? '/customer' : '/admin';
         navigate(target);

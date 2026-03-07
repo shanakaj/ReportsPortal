@@ -198,7 +198,7 @@ export interface AuthTokens {
 }
 
 export interface AuthChallengeResult {
-  challengeName: 'NEW_PASSWORD_REQUIRED' | 'SOFTWARE_TOKEN_MFA' | 'SMS_MFA';
+  challengeName: 'NEW_PASSWORD_REQUIRED' | 'SOFTWARE_TOKEN_MFA' | 'SMS_MFA' | 'MFA_SETUP';
   session: string;
   challengeParameters?: Record<string, string>;
 }

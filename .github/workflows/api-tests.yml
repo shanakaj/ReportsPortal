@@ -1,0 +1,72 @@
+name: API Tests
+
+on:
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment to test
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+  # Callable from other workflows (e.g., deploy.yml)
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+    secrets:
+      AWS_DEPLOY_ROLE_ARN:
+        required: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-southeast-2
+
+jobs:
+  api-smoke-tests:
+    name: API Smoke Tests (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN || vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get CloudFront domain
+        id: get-url
+        run: |
+          STACK_PREFIX="ReportPortal-${{ inputs.environment }}"
+          CF_DOMAIN=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_PREFIX}-Frontend" \
+            --query "Stacks[0].Outputs[?OutputKey=='PortalDistributionDomain'].OutputValue" \
+            --output text)
+          echo "base_url=https://${CF_DOMAIN}" >> "$GITHUB_OUTPUT"
+          echo "Testing against: https://${CF_DOMAIN}"
+
+      - name: Run API smoke tests
+        env:
+          BASE_URL: ${{ steps.get-url.outputs.base_url }}
+        run: node e2e/scripts/api-smoke-test.mjs
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### API Smoke Test Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Base URL:** ${{ steps.get-url.outputs.base_url }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Status:** ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"

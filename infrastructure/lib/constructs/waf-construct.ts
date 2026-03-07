@@ -10,6 +10,7 @@ export interface WafWebAclProps {
   allowedGeoLocations: string[];
   cloudFrontHeaderName?: string;
   cloudFrontHeaderValue?: string;
+  enableOriginHeaderValidation?: boolean;
 }
 
 export class WafWebAcl extends Construct {
@@ -26,7 +27,8 @@ export class WafWebAcl extends Construct {
       rateLimit,
       allowedGeoLocations,
       cloudFrontHeaderName = 'x-origin-verify',
-      cloudFrontHeaderValue = cdk.Fn.select(2, cdk.Fn.split('/', cdk.Aws.STACK_ID)),
+      cloudFrontHeaderValue = 'must-be-provided-when-enableOriginHeaderValidation-is-true',
+      enableOriginHeaderValidation = false,
     } = props;
 
     const rules: wafv2.CfnWebACL.RuleProperty[] = [
@@ -39,6 +41,12 @@ export class WafWebAcl extends Construct {
           managedRuleGroupStatement: {
             vendorName: 'AWS',
             name: 'AWSManagedRulesCommonRuleSet',
+            excludedRules: [
+              // Exclude rules that cause false positives on legitimate JSON API requests
+              { name: 'SizeRestrictions_BODY' },
+              { name: 'CrossSiteScripting_BODY' },
+              { name: 'NoUserAgent_HEADER' },
+            ],
           },
         },
         visibilityConfig: {
@@ -64,11 +72,11 @@ export class WafWebAcl extends Construct {
           metricName: `${name}-KnownBadInputs`,
         },
       },
-      // Rule 3: AWS Managed Rules - Bot Control
+      // Rule 3: AWS Managed Rules - Bot Control (COUNT mode to avoid blocking SPA API calls)
       {
         name: 'AWS-AWSManagedRulesBotControlRuleSet',
         priority: 3,
-        overrideAction: { none: {} },
+        overrideAction: { count: {} },
         statement: {
           managedRuleGroupStatement: {
             vendorName: 'AWS',
@@ -142,8 +150,12 @@ export class WafWebAcl extends Construct {
           metricName: `${name}-IPReputation`,
         },
       },
-      // Rule 7: CloudFront header validation (prevent origin bypass)
-      {
+    ];
+
+    // Rule 7: CloudFront header validation (prevent origin bypass)
+    // Only added to Regional WAFs protecting API Gateway, not CloudFront-facing WAFs
+    if (enableOriginHeaderValidation) {
+      rules.push({
         name: 'CloudFrontHeaderValidation',
         priority: 7,
         action: { block: {} },
@@ -173,8 +185,8 @@ export class WafWebAcl extends Construct {
           cloudWatchMetricsEnabled: true,
           metricName: `${name}-CloudFrontHeader`,
         },
-      },
-    ];
+      });
+    }
 
     this.webAcl = new wafv2.CfnWebACL(this, 'WebACL', {
       name,

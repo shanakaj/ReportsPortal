@@ -1,0 +1,266 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      skip_infra:
+        description: Skip infrastructure deployment (frontend only)
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-southeast-2
+
+jobs:
+  # ─── 1. Build Backend JARs ───────────────────────────────────────────
+  build-backend:
+    name: Build Backend
+    runs-on: ubuntu-latest
+    if: ${{ !inputs.skip_infra }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: corretto
+          java-version: 21
+          cache: maven
+
+      - run: ./mvnw clean package -DskipTests -q
+        working-directory: backend
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-jars
+          path: backend/**/target/*.jar
+          retention-days: 1
+
+  # ─── 2. Deploy Infrastructure (CDK) ─────────────────────────────────
+  deploy-infra:
+    name: Deploy Infrastructure
+    needs: [build-backend]
+    if: ${{ !inputs.skip_infra }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    outputs:
+      spa_bucket: ${{ steps.outputs.outputs.spa_bucket }}
+      distribution_id: ${{ steps.outputs.outputs.distribution_id }}
+      cf_domain: ${{ steps.outputs.outputs.cf_domain }}
+      cognito_pool_id: ${{ steps.outputs.outputs.cognito_pool_id }}
+      cognito_client_id: ${{ steps.outputs.outputs.cognito_client_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: backend-jars
+          path: backend
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: infrastructure/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: corretto
+          java-version: 21
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - run: npm ci
+        working-directory: infrastructure
+
+      - run: npm run build
+        working-directory: infrastructure
+
+      - name: CDK Synth (validate)
+        working-directory: infrastructure
+        run: npx cdk synth --context environment=${{ inputs.environment }} --quiet
+
+      - name: CDK Deploy
+        working-directory: infrastructure
+        run: |
+          npx cdk deploy --all \
+            --context environment=${{ inputs.environment }} \
+            --require-approval never \
+            --outputs-file ${{ github.workspace }}/cdk-outputs.json
+
+      - name: Extract CDK outputs
+        id: outputs
+        run: |
+          STACK_PREFIX="ReportPortal-${{ inputs.environment }}"
+          echo "spa_bucket=$(jq -r ".\"${STACK_PREFIX}-Frontend\".PortalBucketName" cdk-outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "distribution_id=$(jq -r ".\"${STACK_PREFIX}-Frontend\".PortalDistributionId" cdk-outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "cf_domain=$(jq -r ".\"${STACK_PREFIX}-Frontend\".PortalDistributionDomain" cdk-outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "cognito_pool_id=$(jq -r ".\"${STACK_PREFIX}-Auth\".UserPoolId" cdk-outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "cognito_client_id=$(jq -r ".\"${STACK_PREFIX}-Auth\".PortalClientId" cdk-outputs.json)" >> "$GITHUB_OUTPUT"
+
+  # ─── 3. Build Frontend with real environment values ─────────────────
+  build-frontend:
+    name: Build Frontend
+    needs: [deploy-infra]
+    if: ${{ always() && (needs.deploy-infra.result == 'success' || needs.deploy-infra.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve environment values
+        id: env-vars
+        run: |
+          if [ "${{ inputs.skip_infra }}" == "true" ]; then
+            # When skipping infra, look up values from existing CloudFormation stacks
+            STACK_PREFIX="ReportPortal-${{ inputs.environment }}"
+            CF_DOMAIN=$(aws cloudformation describe-stacks \
+              --stack-name "${STACK_PREFIX}-Frontend" \
+              --query "Stacks[0].Outputs[?OutputKey=='PortalDistributionDomain'].OutputValue" \
+              --output text)
+            COGNITO_POOL_ID=$(aws cloudformation describe-stacks \
+              --stack-name "${STACK_PREFIX}-Auth" \
+              --query "Stacks[0].Outputs[?OutputKey=='UserPoolId'].OutputValue" \
+              --output text)
+            COGNITO_CLIENT_ID=$(aws cloudformation describe-stacks \
+              --stack-name "${STACK_PREFIX}-Auth" \
+              --query "Stacks[0].Outputs[?OutputKey=='PortalClientId'].OutputValue" \
+              --output text)
+          else
+            # Use values from CDK deploy outputs
+            CF_DOMAIN="${{ needs.deploy-infra.outputs.cf_domain }}"
+            COGNITO_POOL_ID="${{ needs.deploy-infra.outputs.cognito_pool_id }}"
+            COGNITO_CLIENT_ID="${{ needs.deploy-infra.outputs.cognito_client_id }}"
+          fi
+          echo "cf_domain=${CF_DOMAIN}" >> "$GITHUB_OUTPUT"
+          echo "cognito_pool_id=${COGNITO_POOL_ID}" >> "$GITHUB_OUTPUT"
+          echo "cognito_client_id=${COGNITO_CLIENT_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate .env.production
+        working-directory: frontend
+        run: |
+          cat > .env.production <<EOF
+          VITE_API_BASE_URL=https://${{ steps.env-vars.outputs.cf_domain }}/api
+          VITE_COGNITO_USER_POOL_ID=${{ steps.env-vars.outputs.cognito_pool_id }}
+          VITE_COGNITO_CLIENT_ID=${{ steps.env-vars.outputs.cognito_client_id }}
+          VITE_COGNITO_REGION=${{ env.AWS_REGION }}
+          VITE_CLOUDFRONT_DOMAIN=https://${{ steps.env-vars.outputs.cf_domain }}
+          EOF
+          # Remove leading whitespace from heredoc
+          sed -i 's/^[[:space:]]*//' .env.production
+          echo "Generated .env.production:"
+          cat .env.production
+
+      - run: npm ci
+        working-directory: frontend
+
+      - run: npm run build
+        working-directory: frontend
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 1
+
+  # ─── 4. Deploy Frontend to S3 + CloudFront invalidation ─────────────
+  deploy-frontend:
+    name: Deploy Frontend to S3
+    needs: [build-frontend, deploy-infra]
+    if: ${{ always() && needs.build-frontend.result == 'success' }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist
+
+      - name: Determine deployment targets
+        id: targets
+        run: |
+          if [ "${{ inputs.skip_infra }}" == "true" ]; then
+            STACK_PREFIX="ReportPortal-${{ inputs.environment }}"
+            SPA_BUCKET=$(aws cloudformation describe-stacks \
+              --stack-name "${STACK_PREFIX}-Frontend" \
+              --query "Stacks[0].Outputs[?OutputKey=='PortalBucketName'].OutputValue" \
+              --output text)
+            DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
+              --stack-name "${STACK_PREFIX}-Frontend" \
+              --query "Stacks[0].Outputs[?OutputKey=='PortalDistributionId'].OutputValue" \
+              --output text)
+            echo "spa_bucket=${SPA_BUCKET}" >> "$GITHUB_OUTPUT"
+            echo "distribution_id=${DISTRIBUTION_ID}" >> "$GITHUB_OUTPUT"
+          else
+            echo "spa_bucket=${{ needs.deploy-infra.outputs.spa_bucket }}" >> "$GITHUB_OUTPUT"
+            echo "distribution_id=${{ needs.deploy-infra.outputs.distribution_id }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sync to S3
+        run: aws s3 sync dist/ "s3://${{ steps.targets.outputs.spa_bucket }}/" --delete
+
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ steps.targets.outputs.distribution_id }}" \
+            --paths "/*" \
+            --output text \
+            --query 'Invalidation.Id'
+
+      - name: Summary
+        run: |
+          echo "### Deployment Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **S3 Bucket:** ${{ steps.targets.outputs.spa_bucket }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Distribution:** ${{ steps.targets.outputs.distribution_id }}" >> "$GITHUB_STEP_SUMMARY"
+
+  # ─── 5. Post-deployment verification ────────────────────────────────
+  api-tests:
+    name: API Smoke Tests
+    needs: [deploy-frontend]
+    if: ${{ always() && needs.deploy-frontend.result == 'success' }}
+    uses: ./.github/workflows/api-tests.yml
+    with:
+      environment: ${{ inputs.environment }}
+    secrets: inherit
+
+  e2e-tests:
+    name: E2E Tests
+    needs: [deploy-frontend]
+    if: ${{ always() && needs.deploy-frontend.result == 'success' }}
+    uses: ./.github/workflows/e2e-tests.yml
+    with:
+      environment: ${{ inputs.environment }}
+      browser: chromium
+    secrets: inherit

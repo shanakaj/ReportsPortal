@@ -10,7 +10,10 @@ async function verifyBaseUrl(baseURL: string): Promise<void> {
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const response = await fetch(baseURL, { method: 'HEAD' });
+      const response = await fetch(baseURL, {
+        method: 'HEAD',
+        headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+      });
       if (response.ok || response.status === 302 || response.status === 301) {
         console.log(`[global-setup] Base URL ${baseURL} is accessible (status: ${response.status})`);
         return;
@@ -38,6 +41,7 @@ async function apiRequest(
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   };
   const options: RequestInit = { method, headers };
   if (body) {
