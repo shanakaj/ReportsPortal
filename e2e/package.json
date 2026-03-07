@@ -6,7 +6,12 @@
     "test": "npx playwright test",
     "test:headed": "npx playwright test --headed",
     "test:ui": "npx playwright test --ui",
-    "test:report": "npx playwright show-report"
+    "test:report": "npx playwright show-report",
+    "test:video": "npx playwright test --config playwright.video.config.ts",
+    "test:video:headed": "npx playwright test --config playwright.video.config.ts --headed",
+    "test:video:single": "npx playwright test --config playwright.video.config.ts --grep",
+    "video:report": "npx playwright show-report video-report",
+    "video:collect": "node scripts/collect-videos.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.45.0",

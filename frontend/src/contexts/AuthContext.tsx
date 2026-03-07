@@ -32,7 +32,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
 
   const handleTokens = useCallback((tokens: AuthTokens) => {
-    setTokens(tokens.accessToken, tokens.refreshToken);
+    setTokens(tokens.idToken, tokens.refreshToken);
 
     const impersonator = authService.getImpersonator(tokens.idToken);
     setImpersonatorId(impersonator);

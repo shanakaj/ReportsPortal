@@ -578,7 +578,9 @@ export class ApiStack extends cdk.Stack {
     // ========== REGIONAL WAF for API Gateway (CloudFront origin verification) ==========
 
     this.originVerifyHeaderName = 'x-origin-verify';
-    this.originVerifyHeaderValue = cdk.Fn.select(2, cdk.Fn.split('/', cdk.Aws.STACK_ID));
+    // Use a deterministic value based on account/region/environment so both the API WAF
+    // and CloudFront origin resolve the same value (AWS::StackId differs between stacks)
+    this.originVerifyHeaderValue = `rp-${cdk.Aws.ACCOUNT_ID}-${environmentName}-origin-verify`;
 
     const apiWaf = new WafWebAcl(this, 'ApiWaf', {
       name: `report-portal-api-waf-${environmentName}`,
