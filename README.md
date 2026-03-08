@@ -1,6 +1,6 @@
 # Secure Report Portal
 
-A security-first, multi-tenant AWS serverless application for delivering HTML reports to customers. Each customer has an isolated space with a dedicated S3 bucket. Reports are served via CloudFront with signed cookies, authenticated through API Gateway + Cognito.
+A security-first, multi-tenant AWS serverless application for delivering reports to customers. Supports HTML, PDF, Word, Excel, PowerPoint, and image formats. Each customer has an isolated space with a dedicated S3 bucket. Reports are served via CloudFront with signed cookies, authenticated through API Gateway + Cognito.
 
 ## What It Does
 
@@ -23,7 +23,7 @@ Report Portal provides a dedicated, secure channel where:
 | Capability | Description |
 |-----------|-------------|
 | **Customer Spaces** | Each customer gets an isolated space with its own S3 bucket. No cross-customer data leakage is possible. |
-| **Report Delivery** | Upload HTML reports (with embedded charts, tables, Mermaid diagrams) that customers view in a sandboxed iframe. |
+| **Report Delivery** | Upload multi-format reports (HTML, PDF, Word, Excel, PowerPoint, images). Viewable formats render inline; others download directly. HTML reports support embedded charts, tables, and companion image assets. |
 | **Invitation-Only Access** | No self-registration. Admins invite customers by email; invitations expire after 24 hours. |
 | **MFA-Enforced Login** | Every user must set up TOTP (authenticator app) on first login. No exceptions. |
 | **Feedback System** | Customers can submit feedback on reports with file attachments. Admins receive email + in-app notifications. Threaded conversations with status tracking (open/in-progress/resolved). |
@@ -31,6 +31,7 @@ Report Portal provides a dedicated, secure channel where:
 | **Analytics** | Track report views, active users, and engagement per space. Export analytics data for reporting. |
 | **Impersonation** | Super admins can impersonate customers (read-only) for support and troubleshooting. |
 | **Role-Based Access** | Three roles (Super Admin, Admin, Customer) with fine-grained permissions. Admins are scoped to their assigned spaces. |
+| **Admin Password Reset** | Admins can reset a user's password, which also clears their MFA configuration. The user must set a new password and re-enrol TOTP on next login. |
 
 ### Typical Workflow
 
@@ -38,6 +39,7 @@ Report Portal provides a dedicated, secure channel where:
 flowchart LR
     A["1. Super Admin\ncreates space"] --> B["2. Admin uploads\nHTML report"]
     B --> C["3. Admin invites\ncustomer by email"]
+    B -.->|"HTML, PDF, Word,\nExcel, PPT, Images"| B
     C --> D["4. Customer accepts\n& sets up MFA"]
     D --> E["5. Customer views\nreports via\nsigned cookies"]
     E --> F["6. Customer submits\nfeedback on report"]
@@ -269,7 +271,7 @@ flowchart TD
     subgraph VERIFY["Verify - Post-Deploy"]
         direction LR
         API_TEST["API Smoke Tests\nHeaders, auth, WAF"]
-        E2E_TEST["Playwright E2E\n7 scenarios, MFA, RBAC"]
+        E2E_TEST["Playwright E2E\n137 tests, MFA, RBAC"]
     end
 
     FE_DEPLOY --> API_TEST & E2E_TEST
@@ -328,8 +330,13 @@ cdk bootstrap aws://ACCOUNT_ID/us-east-1
 
 # 3. Configure GitHub (Settings -> Environments -> create "dev")
 #    Variable: AWS_DEPLOY_ROLE_ARN = <role ARN from step 2>
-#    Secret:   E2E_ADMIN_EMAIL = <test admin email>
-#    Secret:   E2E_ADMIN_PASSWORD = <test admin password>
+#    Secret:   SUPER_ADMIN_EMAIL = <super admin email>
+#    Secret:   SUPER_ADMIN_PASSWORD = <super admin password>
+#    Secret:   SUPER_ADMIN_TOTP_SECRET = <base32 TOTP secret (optional)>
+#    Secret:   TEST_ADMIN_EMAIL = <test admin email>
+#    Secret:   TEST_ADMIN_PASSWORD = <test admin password>
+#    Secret:   TEST_CUSTOMER_EMAIL = <test customer email>
+#    Secret:   TEST_CUSTOMER_PASSWORD = <test customer password>
 
 # 4. Trigger deployment
 gh workflow run deploy.yml -f environment=dev
@@ -353,6 +360,19 @@ The OIDC stack creates an IAM role scoped to your GitHub repo only. GitHub Actio
 | Email | Amazon SES |
 | Events | Amazon EventBridge |
 | CI/CD | GitHub Actions (OIDC auth, no stored keys) |
+
+## Supported Report Formats
+
+| Category | Extensions | Viewing Mode |
+|----------|-----------|-------------|
+| HTML | `.html`, `.htm` | Inline iframe + full-tab viewer (supports companion image assets) |
+| PDF | `.pdf` | Inline iframe + full-tab viewer |
+| Image | `.png`, `.jpg`, `.gif`, `.svg`, `.webp` | Inline `<img>` + full-tab viewer |
+| Word | `.doc`, `.docx` | Download |
+| Excel | `.xls`, `.xlsx` | Download |
+| PowerPoint | `.ppt`, `.pptx` | Download |
+
+HTML reports can include accompanying image assets uploaded together and stored under the same `reportId`. Asset images are not shown in the report list.
 
 ## Project Structure
 
@@ -390,8 +410,10 @@ ReportsPortal/
 │       ├── services/             # API layer
 │       └── types/                # TypeScript interfaces
 ├── e2e/                          # Playwright E2E tests
-│   ├── tests/                    # Test specs
-│   └── scripts/                  # API smoke test script
+│   ├── tests/                    # Test specs (8 suites, 137 tests)
+│   ├── fixtures/                 # Auth fixtures (MFA-aware login)
+│   ├── helpers/                  # API helpers, TOTP code generation
+│   └── scripts/                  # Smoke tests, CI user reset
 └── docker-compose.yml            # Local dev (DynamoDB Local)
 ```
 
@@ -428,6 +450,7 @@ flowchart LR
 - **Mandatory TOTP** — Cognito configured with `MFA: REQUIRED`, `SOFTWARE_TOKEN_MFA` only
 - **QR code** generated client-side (`qrcode.react`), no secret sent to external services
 - **Admin MFA reset** — Forces user to re-enrol on next login
+- **Admin password reset** — Resets password AND clears MFA in one operation, forcing full re-enrolment
 - **No SMS fallback** — Eliminates SIM-swap attack vectors
 
 ### Security Layers
@@ -462,7 +485,7 @@ flowchart TD
 
     subgraph Integration["Post-Deploy Tests"]
         API["API Smoke Tests\n- SPA accessibility\n- Security headers\n- Auth endpoint responses\n- Protected endpoint 401s\n- WAF validation"]
-        E2E["Playwright E2E\n100+ scenarios\n- Auth flows (MFA)\n- Role-based access\n- Impersonation\n- Report viewing\n- Feedback lifecycle"]
+        E2E["Playwright E2E\n137 tests + 8 video demos\n- Auth flows (MFA)\n- Role-based access\n- Impersonation\n- Multi-format reports\n- Feedback lifecycle\n- Programmatic MFA in CI"]
     end
 
     classDef unit fill:#2ea44f,stroke:#232f3e,color:#fff
@@ -485,7 +508,7 @@ flowchart TD
 
 ```bash
 # Backend unit tests
-cd backend && ./mvnw test
+cd backend && mvn test
 
 # Frontend unit tests
 cd frontend && npm test
@@ -493,8 +516,17 @@ cd frontend && npm test
 # CDK assertion tests
 cd infrastructure && npm test
 
-# E2E tests (requires deployed environment)
-cd e2e && BASE_URL=https://your-cloudfront-domain npx playwright test
+# E2E tests (requires deployed environment + credentials)
+cd e2e
+export BASE_URL=https://your-cloudfront-domain
+export API_BASE_URL=https://your-cloudfront-domain/api
+export SUPER_ADMIN_EMAIL=admin@example.com
+export SUPER_ADMIN_PASSWORD=YourPassword123!
+npx playwright test
+
+# E2E tests in CI (resets MFA before run — no TOTP secret needed)
+# The CI workflow resets the user's password + MFA via AWS CLI,
+# then the test framework handles MFA_SETUP programmatically.
 
 # API smoke tests (requires deployed environment)
 BASE_URL=https://your-cloudfront-domain node e2e/scripts/api-smoke-test.mjs
@@ -534,7 +566,7 @@ Environments are configured in `infrastructure/cdk.json`:
     "account": "123456789012",
     "region": "ap-southeast-2",
     "domainName": "dev.reports.yourdomain.com",
-    "allowedGeoLocations": ["AU"],
+    "allowedGeoLocations": ["AU", "US"],
     "wafRateLimit": 1000,
     "signedCookieTtlHours": 3,
     "invitationExpiryHours": 24,
