@@ -16,7 +16,7 @@ import path from 'path';
  * DURATION: ~90 seconds
  */
 test.describe('Video 2: Platform Management — Spaces & Reports', () => {
-  const testSpaceName = `Acme Corp Assessment`;
+  const testSpaceName = 'acme-corp-assessment';
 
   test('A super admin creates a space, uploads a report, previews it, and invites a customer', async ({
     superAdminPage: page,
@@ -99,7 +99,7 @@ test.describe('Video 2: Platform Management — Spaces & Reports', () => {
 
       // Submit and watch the space come to life
       const submitButton = page.locator(selectors.createSpace.submitButton).first();
-      await submitButton.click();
+      await submitButton.click({ force: true });
       await page.waitForTimeout(2500);
     });
 

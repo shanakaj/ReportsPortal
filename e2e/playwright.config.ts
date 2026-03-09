@@ -31,6 +31,7 @@ export default defineConfig({
     navigationTimeout: 30_000,
   },
 
+  preserveOutput: 'always',
   globalSetup: path.resolve(__dirname, 'global-setup.ts'),
 
   projects: [
@@ -45,6 +46,18 @@ export default defineConfig({
     {
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },
+    },
+    {
+      name: 'video-demos',
+      testMatch: 'tests/video/**/*.spec.ts',
+      use: {
+        ...devices['Desktop Chrome'],
+        video: 'on',
+        viewport: { width: 1280, height: 720 },
+        launchOptions: { slowMo: 300 },
+      },
+      retries: 0,
+      outputDir: 'videos',
     },
   ],
 });
