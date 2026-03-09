@@ -134,7 +134,7 @@ test.describe('Demo: Visibility — Analytics & Audit Trail', () => {
       if (isExportVisible) {
         await exportButton.scrollIntoViewIfNeeded();
         await page.waitForTimeout(800);
-        await exportButton.hover();
+        await exportButton.hover({ force: true });
         await page.waitForTimeout(1500);
         // Hover only — we don't trigger the download in the demo
       }
