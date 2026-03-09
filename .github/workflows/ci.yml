@@ -58,11 +58,18 @@ jobs:
   infrastructure:
     name: Infrastructure - Build & Test
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: infrastructure
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: corretto
+          java-version: 21
+          cache: maven
+
+      - name: Build backend JARs (required as CDK assets)
+        working-directory: backend
+        run: ./mvnw clean package -q -DskipTests
 
       - uses: actions/setup-node@v4
         with:
@@ -71,5 +78,8 @@ jobs:
           cache-dependency-path: infrastructure/package-lock.json
 
       - run: npm ci
+        working-directory: infrastructure
       - run: npm run build
-      - run: npx jest --passWithNoFailures
+        working-directory: infrastructure
+      - run: npx jest --passWithNoTests
+        working-directory: infrastructure
