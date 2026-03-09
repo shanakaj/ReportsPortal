@@ -4,6 +4,13 @@ import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as sns from 'aws-cdk-lib/aws-sns';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
+import * as kms from 'aws-cdk-lib/aws-kms';
+import * as budgets from 'aws-cdk-lib/aws-budgets';
+import * as ce from 'aws-cdk-lib/aws-ce';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import * as sns_subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 import { EnvironmentConfig } from '../../bin/app';
 
@@ -12,6 +19,8 @@ export interface MonitoringStackProps extends cdk.StackProps {
   envConfig: EnvironmentConfig;
   apiGateway: apigateway.RestApi;
   lambdaFunctions: lambda.IFunction[];
+  dlqQueues: sqs.IQueue[];
+  encryptionKey: kms.IKey;
   tables: dynamodb.ITable[];
 }
 
@@ -22,7 +31,7 @@ export class MonitoringStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: MonitoringStackProps) {
     super(scope, id, props);
 
-    const { environmentName, apiGateway, lambdaFunctions, tables } = props;
+    const { environmentName, envConfig, apiGateway, lambdaFunctions, dlqQueues, encryptionKey, tables } = props;
 
     // SNS Topic for alarms
     this.alarmTopic = new sns.Topic(this, 'AlarmTopic', {
@@ -378,6 +387,257 @@ export class MonitoringStack extends cdk.Stack {
       });
       ddbThrottleAlarm.addAlarmAction(new cdk.aws_cloudwatch_actions.SnsAction(this.alarmTopic));
     });
+
+    // ========== Budget Alerts ==========
+
+    new budgets.CfnBudget(this, 'MonthlyBudget', {
+      budget: {
+        budgetName: `report-portal-monthly-${environmentName}`,
+        budgetType: 'COST',
+        timeUnit: 'MONTHLY',
+        budgetLimit: {
+          amount: 10,
+          unit: 'USD',
+        },
+        costFilters: {
+          Service: [
+            'AWS Lambda',
+            'Amazon DynamoDB',
+            'Amazon Simple Storage Service',
+            'Amazon CloudFront',
+            'Amazon API Gateway',
+            'Amazon Simple Email Service',
+            'Amazon EventBridge',
+            'Amazon Cognito',
+            'AWS WAF',
+            'AWS Key Management Service',
+          ],
+        },
+      },
+      notificationsWithSubscribers: [
+        {
+          notification: {
+            notificationType: 'ACTUAL',
+            comparisonOperator: 'GREATER_THAN',
+            threshold: 50,
+            thresholdType: 'PERCENTAGE',
+          },
+          subscribers: [{ subscriptionType: 'EMAIL', address: envConfig.superAdminEmail }],
+        },
+        {
+          notification: {
+            notificationType: 'ACTUAL',
+            comparisonOperator: 'GREATER_THAN',
+            threshold: 80,
+            thresholdType: 'PERCENTAGE',
+          },
+          subscribers: [{ subscriptionType: 'EMAIL', address: envConfig.superAdminEmail }],
+        },
+        {
+          notification: {
+            notificationType: 'ACTUAL',
+            comparisonOperator: 'GREATER_THAN',
+            threshold: 100,
+            thresholdType: 'PERCENTAGE',
+          },
+          subscribers: [
+            { subscriptionType: 'EMAIL', address: envConfig.superAdminEmail },
+            { subscriptionType: 'SNS', address: this.alarmTopic.topicArn },
+          ],
+        },
+        {
+          notification: {
+            notificationType: 'FORECASTED',
+            comparisonOperator: 'GREATER_THAN',
+            threshold: 100,
+            thresholdType: 'PERCENTAGE',
+          },
+          subscribers: [{ subscriptionType: 'EMAIL', address: envConfig.superAdminEmail }],
+        },
+      ],
+    });
+
+    // ========== Cost Anomaly Detection ==========
+
+    const anomalyMonitor = new ce.CfnAnomalyMonitor(this, 'CostAnomalyMonitor', {
+      monitorName: `report-portal-anomaly-monitor-${environmentName}`,
+      monitorType: 'DIMENSIONAL',
+      monitorDimension: 'SERVICE',
+    });
+
+    // Allow Cost Explorer anomaly alerts to publish to SNS
+    this.alarmTopic.addToResourcePolicy(new iam.PolicyStatement({
+      sid: 'AllowCostAlertsPublish',
+      effect: iam.Effect.ALLOW,
+      principals: [new iam.ServicePrincipal('costalerts.amazonaws.com')],
+      actions: ['SNS:Publish'],
+      resources: [this.alarmTopic.topicArn],
+    }));
+
+    new ce.CfnAnomalySubscription(this, 'CostAnomalySubscription', {
+      subscriptionName: `report-portal-anomaly-sub-${environmentName}`,
+      frequency: 'IMMEDIATE',
+      monitorArnList: [anomalyMonitor.attrMonitorArn],
+      subscribers: [
+        {
+          type: 'SNS',
+          address: this.alarmTopic.topicArn,
+        },
+      ],
+      thresholdExpression: JSON.stringify({
+        Dimensions: {
+          Key: 'ANOMALY_TOTAL_IMPACT_ABSOLUTE',
+          MatchOptions: ['GREATER_THAN_OR_EQUAL'],
+          Values: ['5'],
+        },
+      }),
+    });
+
+    // ========== DLQ Depth Alarms ==========
+
+    const dlqNames = ['auth', 'admin', 'customer', 'feedback', 'analytics', 'audit', 'notification'];
+    dlqQueues.forEach((dlq, idx) => {
+      const dlqAlarm = new cloudwatch.Alarm(this, `DlqDepth${dlqNames[idx]}`, {
+        alarmName: `report-portal-dlq-depth-${dlqNames[idx]}-${environmentName}`,
+        alarmDescription: `DLQ depth exceeded threshold for ${dlqNames[idx]} function`,
+        metric: new cloudwatch.Metric({
+          namespace: 'AWS/SQS',
+          metricName: 'ApproximateNumberOfMessagesVisible',
+          dimensionsMap: { QueueName: dlq.queueName },
+          statistic: 'Maximum',
+          period: cdk.Duration.minutes(5),
+        }),
+        threshold: 5,
+        evaluationPeriods: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+      dlqAlarm.addAlarmAction(new cdk.aws_cloudwatch_actions.SnsAction(this.alarmTopic));
+    });
+
+    // ========== Per-function Error & Throttle Alarms (Circuit Breaker) ==========
+
+    lambdaFunctions.forEach((fn, idx) => {
+      // Error alarm: Errors > 10 over 5 minutes
+      const fnErrorAlarm = new cloudwatch.Alarm(this, `CircuitBreakerError${idx}`, {
+        alarmName: `report-portal-cb-error-${idx}-${environmentName}`,
+        alarmDescription: `Circuit breaker: Lambda errors exceeded threshold for function ${idx}`,
+        metric: new cloudwatch.Metric({
+          namespace: 'AWS/Lambda',
+          metricName: 'Errors',
+          dimensionsMap: { FunctionName: fn.functionName },
+          statistic: 'Sum',
+          period: cdk.Duration.minutes(5),
+        }),
+        threshold: 10,
+        evaluationPeriods: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+      fnErrorAlarm.addAlarmAction(new cdk.aws_cloudwatch_actions.SnsAction(this.alarmTopic));
+
+      // Throttle alarm: Throttles > 5 over 5 minutes
+      const fnThrottleAlarm = new cloudwatch.Alarm(this, `CircuitBreakerThrottle${idx}`, {
+        alarmName: `report-portal-cb-throttle-${idx}-${environmentName}`,
+        alarmDescription: `Circuit breaker: Lambda throttles exceeded threshold for function ${idx}`,
+        metric: new cloudwatch.Metric({
+          namespace: 'AWS/Lambda',
+          metricName: 'Throttles',
+          dimensionsMap: { FunctionName: fn.functionName },
+          statistic: 'Sum',
+          period: cdk.Duration.minutes(5),
+        }),
+        threshold: 5,
+        evaluationPeriods: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+      fnThrottleAlarm.addAlarmAction(new cdk.aws_cloudwatch_actions.SnsAction(this.alarmTopic));
+    });
+
+    // ========== Circuit Breaker Lambda ==========
+
+    const circuitBreakerDlq = new sqs.Queue(this, 'CircuitBreakerDlq', {
+      queueName: `report-portal-circuit-breaker-dlq-${environmentName}`,
+      retentionPeriod: cdk.Duration.days(14),
+      encryptionMasterKey: encryptionKey,
+    });
+
+    const functionArns = lambdaFunctions.map(fn => fn.functionArn);
+
+    const circuitBreakerFn = new lambda.Function(this, 'CircuitBreakerFunction', {
+      functionName: `report-portal-circuit-breaker-${environmentName}`,
+      description: 'Disables Lambda functions when budget threshold is breached',
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'index.handler',
+      reservedConcurrentExecutions: 1,
+      deadLetterQueue: circuitBreakerDlq,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 128,
+      logRetention: logs.RetentionDays.ONE_MONTH,
+      environment: {
+        FUNCTION_ARNS: JSON.stringify(functionArns),
+        SNS_TOPIC_ARN: this.alarmTopic.topicArn,
+      },
+      code: lambda.Code.fromInline(`
+const { LambdaClient, PutFunctionConcurrencyCommand } = require('@aws-sdk/client-lambda');
+const { SNSClient, PublishCommand } = require('@aws-sdk/client-sns');
+
+exports.handler = async (event) => {
+  const lambdaClient = new LambdaClient();
+  const snsClient = new SNSClient();
+  const functionArns = JSON.parse(process.env.FUNCTION_ARNS || '[]');
+  const topicArn = process.env.SNS_TOPIC_ARN;
+  const disabledFunctions = [];
+
+  for (const arn of functionArns) {
+    const functionName = arn.split(':function:')[1];
+    try {
+      await lambdaClient.send(new PutFunctionConcurrencyCommand({
+        FunctionName: functionName,
+        ReservedConcurrentExecutions: 0,
+      }));
+      disabledFunctions.push(functionName);
+      console.log('Disabled function:', functionName);
+    } catch (err) {
+      console.error('Failed to disable function:', functionName, err);
+    }
+  }
+
+  if (disabledFunctions.length > 0 && topicArn) {
+    await snsClient.send(new PublishCommand({
+      TopicArn: topicArn,
+      Subject: 'CIRCUIT BREAKER ACTIVATED - Lambda functions disabled',
+      Message: [
+        'Budget threshold breached. The following Lambda functions have been disabled (concurrency set to 0):',
+        '',
+        ...disabledFunctions.map(f => '  - ' + f),
+        '',
+        'To re-enable, manually set ReservedConcurrentExecutions back to the desired value.',
+      ].join('\\n'),
+    }));
+  }
+
+  return { statusCode: 200, disabled: disabledFunctions };
+};
+      `),
+    });
+
+    // Grant the circuit breaker Lambda permission to disable other functions
+    circuitBreakerFn.addToRolePolicy(new iam.PolicyStatement({
+      sid: 'AllowPutFunctionConcurrency',
+      effect: iam.Effect.ALLOW,
+      actions: ['lambda:PutFunctionConcurrency'],
+      resources: functionArns,
+    }));
+
+    // Grant SNS publish permission
+    this.alarmTopic.grantPublish(circuitBreakerFn);
+
+    // Subscribe circuit breaker to the alarm topic (triggered by budget alerts)
+    this.alarmTopic.addSubscription(
+      new sns_subscriptions.LambdaSubscription(circuitBreakerFn)
+    );
 
     // ========== Outputs ==========
 

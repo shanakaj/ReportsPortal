@@ -4,6 +4,7 @@ import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as events from 'aws-cdk-lib/aws-events';
@@ -39,6 +40,7 @@ export interface ApiStackProps extends cdk.StackProps {
 export class ApiStack extends cdk.Stack {
   public readonly api: apigateway.RestApi;
   public readonly lambdaFunctions: lambda.IFunction[];
+  public readonly dlqQueues: sqs.IQueue[];
   public readonly originVerifyHeaderName: string;
   public readonly originVerifyHeaderValue: string;
 
@@ -94,6 +96,26 @@ export class ApiStack extends cdk.Stack {
 
     const backendCodePath = '../backend';
 
+    // ========== Cost Protection: Concurrency + DLQs ==========
+    const reservedConcurrentExecutions = environmentName === 'prod' ? 10 : 5;
+
+    // Helper to create a KMS-encrypted DLQ for each Lambda function
+    const createDlq = (name: string): sqs.Queue => {
+      return new sqs.Queue(this, `${name}Dlq`, {
+        queueName: `report-portal-${name}-dlq-${environmentName}`,
+        retentionPeriod: cdk.Duration.days(14),
+        encryptionMasterKey: encryptionKey,
+      });
+    };
+
+    const authDlq = createDlq('auth');
+    const adminDlq = createDlq('admin');
+    const customerDlq = createDlq('customer');
+    const feedbackDlq = createDlq('feedback');
+    const analyticsDlq = createDlq('analytics');
+    const auditDlq = createDlq('audit');
+    const notificationDlq = createDlq('notification');
+
     // ========== Lambda Functions ==========
 
     // Auth Function
@@ -106,6 +128,8 @@ export class ApiStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(30),
       environment: commonEnv,
       environmentName,
+      reservedConcurrentExecutions,
+      deadLetterQueue: authDlq,
     });
 
     // Admin Function
@@ -118,6 +142,8 @@ export class ApiStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(30),
       environment: commonEnv,
       environmentName,
+      reservedConcurrentExecutions,
+      deadLetterQueue: adminDlq,
     });
 
     // Customer Function
@@ -130,6 +156,8 @@ export class ApiStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(30),
       environment: commonEnv,
       environmentName,
+      reservedConcurrentExecutions,
+      deadLetterQueue: customerDlq,
     });
 
     // Feedback Function
@@ -142,6 +170,8 @@ export class ApiStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(30),
       environment: commonEnv,
       environmentName,
+      reservedConcurrentExecutions,
+      deadLetterQueue: feedbackDlq,
     });
 
     // Analytics Function
@@ -154,6 +184,8 @@ export class ApiStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(30),
       environment: commonEnv,
       environmentName,
+      reservedConcurrentExecutions,
+      deadLetterQueue: analyticsDlq,
     });
 
     // Audit Function
@@ -166,6 +198,8 @@ export class ApiStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(30),
       environment: commonEnv,
       environmentName,
+      reservedConcurrentExecutions,
+      deadLetterQueue: auditDlq,
     });
 
     // Notification Function
@@ -178,6 +212,8 @@ export class ApiStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(30),
       environment: commonEnv,
       environmentName,
+      reservedConcurrentExecutions,
+      deadLetterQueue: notificationDlq,
     });
 
     this.lambdaFunctions = [
@@ -188,6 +224,16 @@ export class ApiStack extends cdk.Stack {
       analyticsFunction.function,
       auditFunction.function,
       notificationFunction.function,
+    ];
+
+    this.dlqQueues = [
+      authDlq,
+      adminDlq,
+      customerDlq,
+      feedbackDlq,
+      analyticsDlq,
+      auditDlq,
+      notificationDlq,
     ];
 
     // ========== EventBridge Rules (targeting notification function) ==========
@@ -246,7 +292,9 @@ export class ApiStack extends cdk.Stack {
       effect: iam.Effect.ALLOW,
       actions: [
         'cognito-idp:InitiateAuth',
+        'cognito-idp:AdminInitiateAuth',
         'cognito-idp:RespondToAuthChallenge',
+        'cognito-idp:AdminRespondToAuthChallenge',
         'cognito-idp:ForgotPassword',
         'cognito-idp:ConfirmForgotPassword',
         'cognito-idp:ChangePassword',

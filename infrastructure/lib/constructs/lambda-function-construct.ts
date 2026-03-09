@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
@@ -16,6 +17,8 @@ export interface JavaLambdaFunctionProps {
   enableSnapStart?: boolean;
   enableTracing?: boolean;
   logRetentionDays?: number;
+  reservedConcurrentExecutions?: number;
+  deadLetterQueue?: sqs.IQueue;
 }
 
 export class JavaLambdaFunction extends Construct {
@@ -37,6 +40,8 @@ export class JavaLambdaFunction extends Construct {
       enableSnapStart = true,
       enableTracing = true,
       logRetentionDays = 30,
+      reservedConcurrentExecutions,
+      deadLetterQueue,
     } = props;
 
     this.function = new lambda.Function(this, 'Function', {
@@ -55,6 +60,8 @@ export class JavaLambdaFunction extends Construct {
       tracing: enableTracing ? lambda.Tracing.ACTIVE : lambda.Tracing.DISABLED,
       logRetention: logRetentionDays as logs.RetentionDays,
       architecture: lambda.Architecture.X86_64,
+      reservedConcurrentExecutions,
+      deadLetterQueue,
     });
 
     // Enable SnapStart

@@ -6,6 +6,8 @@ import { SecurityStack } from '../lib/stacks/security-stack';
 import { FrontendStack } from '../lib/stacks/frontend-stack';
 import { EventsStack } from '../lib/stacks/events-stack';
 import { EmailStack } from '../lib/stacks/email-stack';
+import { ApiStack } from '../lib/stacks/api-stack';
+import { MonitoringStack } from '../lib/stacks/monitoring-stack';
 import { EnvironmentConfig } from '../bin/app';
 
 const testEnvConfig: EnvironmentConfig = {
@@ -313,7 +315,7 @@ describe('StorageStack - DynamoDB Tables', () => {
   test('All DynamoDB tables use customer-managed KMS encryption', () => {
     const tables = template.findResources('AWS::DynamoDB::Table');
     const tableCount = Object.keys(tables).length;
-    expect(tableCount).toBe(9); // 9 tables total
+    expect(tableCount).toBe(10); // 10 tables total
 
     for (const [, resource] of Object.entries(tables)) {
       const props = (resource as Record<string, unknown>)['Properties'] as Record<string, unknown>;
@@ -439,50 +441,29 @@ describe('AuthStack - Cognito', () => {
 });
 
 describe('EventsStack', () => {
-  let template: Template;
+  let eventsTemplate: Template;
 
   beforeAll(() => {
     const app = new cdk.App();
-    const stack = new EventsStack(app, 'TestEvents', {
+
+    const eventsStack = new EventsStack(app, 'TestEvents', {
       env: testEnv,
       environmentName: 'test',
       envConfig: testEnvConfig,
     });
-    template = Template.fromStack(stack);
+    eventsTemplate = Template.fromStack(eventsStack);
   });
 
   test('Custom event bus is created', () => {
-    template.hasResourceProperties('AWS::Events::EventBus', {
+    eventsTemplate.hasResourceProperties('AWS::Events::EventBus', {
       Name: 'report-portal-events-test',
     });
   });
 
-  test('EventBridge rule for feedback.new exists', () => {
-    template.hasResourceProperties('AWS::Events::Rule', {
-      EventPattern: {
-        source: ['report-portal'],
-        'detail-type': ['feedback.new'],
-      },
-    });
-  });
-
-  test('EventBridge rule for feedback.reply exists', () => {
-    template.hasResourceProperties('AWS::Events::Rule', {
-      EventPattern: {
-        source: ['report-portal'],
-        'detail-type': ['feedback.reply'],
-      },
-    });
-  });
-
-  test('EventBridge rule for user.first_login exists', () => {
-    template.hasResourceProperties('AWS::Events::Rule', {
-      EventPattern: {
-        source: ['report-portal'],
-        'detail-type': ['user.first_login'],
-      },
-    });
-  });
+  // Note: EventBridge rules (feedback.new, feedback.reply, user.first_login) are
+  // defined in ApiStack to avoid circular dependencies. They are tested in the
+  // 'Cost Protection - ApiStack' describe block below which already instantiates
+  // the full ApiStack.
 });
 
 describe('EmailStack', () => {
@@ -543,5 +524,288 @@ describe('Lambda Functions - SnapStart', () => {
         ApplyOn: 'PublishedVersions',
       },
     });
+  });
+});
+
+// ========== Cost Protection Tests ==========
+
+describe('Cost Protection - ApiStack (DLQs & Concurrency)', () => {
+  let template: Template;
+
+  beforeAll(() => {
+    const app = new cdk.App();
+
+    const authStack = new AuthStack(app, 'TestAuth2', {
+      env: testEnv,
+      environmentName: 'test',
+      envConfig: testEnvConfig,
+    });
+
+    const storageStack = new StorageStack(app, 'TestStorage2', {
+      env: testEnv,
+      environmentName: 'test',
+      envConfig: testEnvConfig,
+    });
+
+    const eventsStack = new EventsStack(app, 'TestEvents2', {
+      env: testEnv,
+      environmentName: 'test',
+      envConfig: testEnvConfig,
+    });
+
+    const apiStack = new ApiStack(app, 'TestApi2', {
+      env: testEnv,
+      environmentName: 'test',
+      envConfig: testEnvConfig,
+      userPool: authStack.userPool,
+      userPoolClient: authStack.portalAppClient,
+      usersTable: storageStack.usersTable,
+      spacesTable: storageStack.spacesTable,
+      reportsTable: storageStack.reportsTable,
+      invitationsTable: storageStack.invitationsTable,
+      auditLogTable: storageStack.auditLogTable,
+      analyticsTable: storageStack.analyticsTable,
+      notificationsTable: storageStack.notificationsTable,
+      feedbackThreadsTable: storageStack.feedbackThreadsTable,
+      feedbackMessagesTable: storageStack.feedbackMessagesTable,
+      feedbackBucket: storageStack.feedbackBucket,
+      auditBucket: storageStack.auditBucket,
+      encryptionKey: storageStack.encryptionKey,
+      eventBus: eventsStack.eventBus,
+      platformSettingsTable: storageStack.platformSettingsTable,
+    });
+
+    template = Template.fromStack(apiStack);
+  });
+
+  test('All Lambda functions have ReservedConcurrentExecutions set', () => {
+    const functions = template.findResources('AWS::Lambda::Function');
+    const javaFunctions = Object.entries(functions).filter(([, resource]) => {
+      const props = (resource as Record<string, unknown>)['Properties'] as Record<string, unknown>;
+      return props['Runtime'] === 'java21';
+    });
+
+    expect(javaFunctions.length).toBeGreaterThanOrEqual(7);
+    for (const [name, resource] of javaFunctions) {
+      const props = (resource as Record<string, unknown>)['Properties'] as Record<string, unknown>;
+      expect(props['ReservedConcurrentExecutions']).toBeDefined();
+      expect(props['ReservedConcurrentExecutions']).toBe(5); // non-prod = 5
+    }
+  });
+
+  test('All Lambda functions have a Dead Letter Queue configured', () => {
+    const functions = template.findResources('AWS::Lambda::Function');
+    const javaFunctions = Object.entries(functions).filter(([, resource]) => {
+      const props = (resource as Record<string, unknown>)['Properties'] as Record<string, unknown>;
+      return props['Runtime'] === 'java21';
+    });
+
+    for (const [name, resource] of javaFunctions) {
+      const props = (resource as Record<string, unknown>)['Properties'] as Record<string, unknown>;
+      expect(props['DeadLetterConfig']).toBeDefined();
+    }
+  });
+
+  test('7 SQS DLQs are created with 14-day retention', () => {
+    const queues = template.findResources('AWS::SQS::Queue');
+    const dlqQueues = Object.entries(queues).filter(([, resource]) => {
+      const props = (resource as Record<string, unknown>)['Properties'] as Record<string, unknown>;
+      const name = props['QueueName'] as string | undefined;
+      return name && name.includes('-dlq-');
+    });
+
+    expect(dlqQueues.length).toBe(7);
+    for (const [, resource] of dlqQueues) {
+      const props = (resource as Record<string, unknown>)['Properties'] as Record<string, unknown>;
+      expect(props['MessageRetentionPeriod']).toBe(1209600); // 14 days in seconds
+    }
+  });
+
+  test('DLQs are KMS encrypted', () => {
+    const queues = template.findResources('AWS::SQS::Queue');
+    const dlqQueues = Object.entries(queues).filter(([, resource]) => {
+      const props = (resource as Record<string, unknown>)['Properties'] as Record<string, unknown>;
+      const name = props['QueueName'] as string | undefined;
+      return name && name.includes('-dlq-');
+    });
+
+    for (const [, resource] of dlqQueues) {
+      const props = (resource as Record<string, unknown>)['Properties'] as Record<string, unknown>;
+      expect(props['KmsMasterKeyId']).toBeDefined();
+    }
+  });
+
+  // EventBridge rules are defined in ApiStack (not EventsStack) to avoid circular deps
+  test('EventBridge rule for feedback.new exists', () => {
+    template.hasResourceProperties('AWS::Events::Rule', {
+      EventPattern: {
+        source: ['report-portal'],
+        'detail-type': ['feedback.new'],
+      },
+    });
+  });
+
+  test('EventBridge rule for feedback.reply exists', () => {
+    template.hasResourceProperties('AWS::Events::Rule', {
+      EventPattern: {
+        source: ['report-portal'],
+        'detail-type': ['feedback.reply'],
+      },
+    });
+  });
+
+  test('EventBridge rule for user.first_login exists', () => {
+    template.hasResourceProperties('AWS::Events::Rule', {
+      EventPattern: {
+        source: ['report-portal'],
+        'detail-type': ['user.first_login'],
+      },
+    });
+  });
+});
+
+describe('Cost Protection - MonitoringStack (Budget, Anomaly, Circuit Breaker)', () => {
+  let template: Template;
+
+  beforeAll(() => {
+    const app = new cdk.App();
+
+    const authStack = new AuthStack(app, 'TestAuth3', {
+      env: testEnv,
+      environmentName: 'test',
+      envConfig: testEnvConfig,
+    });
+
+    const storageStack = new StorageStack(app, 'TestStorage3', {
+      env: testEnv,
+      environmentName: 'test',
+      envConfig: testEnvConfig,
+    });
+
+    const eventsStack = new EventsStack(app, 'TestEvents3', {
+      env: testEnv,
+      environmentName: 'test',
+      envConfig: testEnvConfig,
+    });
+
+    const apiStack = new ApiStack(app, 'TestApi3', {
+      env: testEnv,
+      environmentName: 'test',
+      envConfig: testEnvConfig,
+      userPool: authStack.userPool,
+      userPoolClient: authStack.portalAppClient,
+      usersTable: storageStack.usersTable,
+      spacesTable: storageStack.spacesTable,
+      reportsTable: storageStack.reportsTable,
+      invitationsTable: storageStack.invitationsTable,
+      auditLogTable: storageStack.auditLogTable,
+      analyticsTable: storageStack.analyticsTable,
+      notificationsTable: storageStack.notificationsTable,
+      feedbackThreadsTable: storageStack.feedbackThreadsTable,
+      feedbackMessagesTable: storageStack.feedbackMessagesTable,
+      feedbackBucket: storageStack.feedbackBucket,
+      auditBucket: storageStack.auditBucket,
+      encryptionKey: storageStack.encryptionKey,
+      eventBus: eventsStack.eventBus,
+      platformSettingsTable: storageStack.platformSettingsTable,
+    });
+
+    const monitoringStack = new MonitoringStack(app, 'TestMonitoring3', {
+      env: testEnv,
+      environmentName: 'test',
+      envConfig: testEnvConfig,
+      apiGateway: apiStack.api,
+      lambdaFunctions: apiStack.lambdaFunctions,
+      dlqQueues: apiStack.dlqQueues,
+      encryptionKey: storageStack.encryptionKey,
+      tables: [
+        storageStack.usersTable,
+        storageStack.spacesTable,
+        storageStack.reportsTable,
+        storageStack.auditLogTable,
+        storageStack.analyticsTable,
+        storageStack.feedbackThreadsTable,
+        storageStack.feedbackMessagesTable,
+      ],
+    });
+
+    template = Template.fromStack(monitoringStack);
+  });
+
+  test('Budget resource exists with $10 monthly threshold', () => {
+    template.hasResourceProperties('AWS::Budgets::Budget', {
+      Budget: Match.objectLike({
+        BudgetType: 'COST',
+        TimeUnit: 'MONTHLY',
+        BudgetLimit: {
+          Amount: 10,
+          Unit: 'USD',
+        },
+      }),
+    });
+  });
+
+  test('Budget has 4 notification thresholds (50%, 80%, 100% actual + 100% forecasted)', () => {
+    template.hasResourceProperties('AWS::Budgets::Budget', {
+      NotificationsWithSubscribers: Match.arrayWith([
+        Match.objectLike({
+          Notification: Match.objectLike({ NotificationType: 'ACTUAL', Threshold: 50 }),
+        }),
+        Match.objectLike({
+          Notification: Match.objectLike({ NotificationType: 'ACTUAL', Threshold: 80 }),
+        }),
+        Match.objectLike({
+          Notification: Match.objectLike({ NotificationType: 'ACTUAL', Threshold: 100 }),
+        }),
+        Match.objectLike({
+          Notification: Match.objectLike({ NotificationType: 'FORECASTED', Threshold: 100 }),
+        }),
+      ]),
+    });
+  });
+
+  test('Cost Anomaly Monitor exists with DIMENSIONAL type', () => {
+    template.hasResourceProperties('AWS::CE::AnomalyMonitor', {
+      MonitorType: 'DIMENSIONAL',
+      MonitorDimension: 'SERVICE',
+    });
+  });
+
+  test('Cost Anomaly Subscription exists with IMMEDIATE frequency', () => {
+    template.hasResourceProperties('AWS::CE::AnomalySubscription', {
+      Frequency: 'IMMEDIATE',
+    });
+  });
+
+  test('Circuit breaker Lambda exists with concurrency = 1', () => {
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Runtime: 'nodejs20.x',
+      ReservedConcurrentExecutions: 1,
+    });
+  });
+
+  test('Circuit breaker Lambda has DLQ configured', () => {
+    const functions = template.findResources('AWS::Lambda::Function');
+    const circuitBreakerFn = Object.entries(functions).find(([, resource]) => {
+      const props = (resource as Record<string, unknown>)['Properties'] as Record<string, unknown>;
+      return props['Runtime'] === 'nodejs20.x';
+    });
+
+    expect(circuitBreakerFn).toBeDefined();
+    if (circuitBreakerFn) {
+      const props = (circuitBreakerFn[1] as Record<string, unknown>)['Properties'] as Record<string, unknown>;
+      expect(props['DeadLetterConfig']).toBeDefined();
+    }
+  });
+
+  test('DLQ depth alarms exist for each queue', () => {
+    const alarms = template.findResources('AWS::CloudWatch::Alarm');
+    const dlqAlarms = Object.entries(alarms).filter(([, resource]) => {
+      const props = (resource as Record<string, unknown>)['Properties'] as Record<string, unknown>;
+      const name = props['AlarmName'] as string | undefined;
+      return name && name.includes('dlq-depth');
+    });
+
+    expect(dlqAlarms.length).toBe(7);
   });
 });

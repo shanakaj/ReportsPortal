@@ -138,6 +138,8 @@ const monitoringStack = new MonitoringStack(app, `${prefix}-Monitoring`, {
   envConfig,
   apiGateway: apiStack.api,
   lambdaFunctions: apiStack.lambdaFunctions,
+  dlqQueues: apiStack.dlqQueues,
+  encryptionKey: storageStack.encryptionKey,
   tables: [
     storageStack.usersTable,
     storageStack.spacesTable,
