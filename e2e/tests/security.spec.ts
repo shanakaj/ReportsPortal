@@ -277,9 +277,9 @@ test.describe('Security Boundary Tests', () => {
 
       // Login
       await page.goto(`${BASE_URL}/login`);
-      await page.locator(selectors.auth.emailInput).fill(email);
-      await page.locator(selectors.auth.passwordInput).fill(password);
-      await page.locator(selectors.auth.signInButton).click();
+      await page.locator(selectors.login.emailInput).fill(email);
+      await page.locator(selectors.login.passwordInput).fill(password);
+      await page.locator(selectors.login.submitButton).click();
       await page.waitForURL((url) => !url.pathname.endsWith('/login'), { timeout: 15_000 });
 
       if (page.url().includes('mfa')) return;

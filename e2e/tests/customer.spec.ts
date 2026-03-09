@@ -317,7 +317,7 @@ test.describe('Customer Journey', () => {
       const changePasswordBtn = page.locator('button:has-text("Change Password")');
       if (await changePasswordBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
         await changePasswordBtn.click();
-        await expect(page.locator(selectors.auth.currentPasswordInput)).toBeVisible({ timeout: 5_000 });
+        await expect(page.locator('input[type="password"][name="currentPassword"], input[aria-label*="Current" i]')).toBeVisible({ timeout: 5_000 });
       }
     });
   });

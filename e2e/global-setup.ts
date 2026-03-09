@@ -1,317 +1,276 @@
-import { FullConfig } from '@playwright/test';
+import { FullConfig, request as playwrightRequest } from '@playwright/test';
+import type { APIRequestContext } from '@playwright/test';
 import * as dotenv from 'dotenv';
 import path from 'path';
-import { generateTotpCode } from './helpers/totp';
+import fs from 'fs';
+import * as api from './helpers/api';
 
 dotenv.config({ path: path.resolve(__dirname, '.env') });
 
-async function verifyBaseUrl(baseURL: string): Promise<void> {
-  const maxRetries = 3;
-  const retryDelay = 5_000;
+const STATE_FILE = path.resolve(__dirname, '.auth-state.json');
 
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const response = await fetch(baseURL, {
-        method: 'HEAD',
-        headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
-      });
-      if (response.ok || response.status === 302 || response.status === 301) {
-        console.log(`[global-setup] Base URL ${baseURL} is accessible (status: ${response.status})`);
-        return;
-      }
-      console.warn(`[global-setup] Base URL returned status ${response.status}, attempt ${attempt}/${maxRetries}`);
-    } catch (error) {
-      console.warn(`[global-setup] Failed to reach ${baseURL}, attempt ${attempt}/${maxRetries}: ${error}`);
-    }
-    if (attempt < maxRetries) {
-      await new Promise((resolve) => setTimeout(resolve, retryDelay));
-    }
-  }
-  throw new Error(`[global-setup] Base URL ${baseURL} is not accessible after ${maxRetries} attempts`);
+interface AuthState {
+  superAdminTotpSecret?: string;
+  testAdminTotpSecret?: string;
+  testCustomerTotpSecret?: string;
+  testSpaceId?: string;
+  testReportId?: string;
 }
 
-async function apiRequest(
-  baseURL: string,
-  method: string,
-  endpoint: string,
-  token: string,
-  body?: Record<string, unknown>,
-): Promise<Response> {
-  const apiBase = process.env.API_BASE_URL || baseURL;
-  const url = `${apiBase}${endpoint}`;
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
-    'Content-Type': 'application/json',
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  };
-  const options: RequestInit = { method, headers };
-  if (body) {
-    options.body = JSON.stringify(body);
+function loadState(): AuthState {
+  try {
+    return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
+  } catch {
+    return {};
   }
-  return fetch(url, options);
 }
 
+function saveState(state: AuthState): void {
+  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+}
+
+/**
+ * Login a user via Playwright request context (passes WAF bot detection).
+ * Handles MFA_SETUP and SOFTWARE_TOKEN_MFA challenges.
+ */
 async function loginUser(
-  baseURL: string,
+  ctx: APIRequestContext,
   email: string,
   password: string,
   totpSecret?: string,
-): Promise<string> {
-  const apiBase = process.env.API_BASE_URL || baseURL;
-  const UA =
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-
-  const response = await fetch(`${apiBase}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'User-Agent': UA },
-    body: JSON.stringify({ email, password }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Login failed for ${email}: ${response.status} ${response.statusText}`);
+): Promise<{ token: string; totpSecret?: string }> {
+  try {
+    const result = await api.loginWithMfa(ctx, email, password, totpSecret);
+    // Use idToken for API Gateway Cognito Authorizer (not accessToken)
+    const token = result.idToken || result.accessToken || '';
+    return { token, totpSecret: result.totpSecret || totpSecret };
+  } catch (error) {
+    throw new Error(`Login failed for ${email}: ${error}`);
   }
-
-  const data = (await response.json()) as {
-    accessToken?: string;
-    idToken?: string;
-    challengeName?: string;
-    session?: string;
-    secretCode?: string;
-  };
-
-  // Direct tokens - no MFA
-  if (data.accessToken) {
-    return data.accessToken;
-  }
-
-  // Handle MFA_SETUP challenge (first time after MFA reset)
-  if (data.challengeName === 'MFA_SETUP' && data.secretCode && data.session) {
-    console.log(`[global-setup] MFA_SETUP challenge for ${email}, setting up TOTP...`);
-    const code = generateTotpCode(data.secretCode);
-    const verifyResp = await fetch(`${apiBase}/auth/mfa-verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'User-Agent': UA },
-      body: JSON.stringify({ session: data.session, mfaCode: code, challengeName: 'MFA_SETUP' }),
-    });
-    if (verifyResp.ok) {
-      const verifyData = (await verifyResp.json()) as {
-        accessToken?: string;
-        challengeName?: string;
-        session?: string;
-      };
-      if (verifyData.accessToken) return verifyData.accessToken;
-      // May need SOFTWARE_TOKEN_MFA after setup
-      if (verifyData.challengeName === 'SOFTWARE_TOKEN_MFA' && verifyData.session) {
-        const finalCode = generateTotpCode(data.secretCode);
-        const finalResp = await fetch(`${apiBase}/auth/mfa-verify`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'User-Agent': UA },
-          body: JSON.stringify({
-            session: verifyData.session,
-            mfaCode: finalCode,
-            challengeName: 'SOFTWARE_TOKEN_MFA',
-          }),
-        });
-        if (finalResp.ok) {
-          const finalData = (await finalResp.json()) as { accessToken?: string };
-          return finalData.accessToken || '';
-        }
-      }
-    }
-    throw new Error(`MFA setup verification failed for ${email}`);
-  }
-
-  // Handle SOFTWARE_TOKEN_MFA challenge (normal MFA)
-  if (data.challengeName === 'SOFTWARE_TOKEN_MFA' && data.session) {
-    if (!totpSecret) {
-      throw new Error(
-        `SOFTWARE_TOKEN_MFA challenge for ${email} but no TOTP secret. ` +
-          'Set SUPER_ADMIN_TOTP_SECRET or relevant env var.',
-      );
-    }
-    console.log(`[global-setup] SOFTWARE_TOKEN_MFA challenge for ${email}, generating TOTP...`);
-    const code = generateTotpCode(totpSecret);
-    const mfaResp = await fetch(`${apiBase}/auth/mfa-verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'User-Agent': UA },
-      body: JSON.stringify({
-        session: data.session,
-        mfaCode: code,
-        challengeName: 'SOFTWARE_TOKEN_MFA',
-      }),
-    });
-    if (!mfaResp.ok) {
-      throw new Error(`MFA verification failed for ${email}: ${mfaResp.status}`);
-    }
-    const mfaData = (await mfaResp.json()) as { accessToken?: string };
-    return mfaData.accessToken || '';
-  }
-
-  return data.idToken || '';
 }
 
-async function ensureTestAdmin(baseURL: string, superAdminToken: string): Promise<void> {
-  const testAdminEmail = process.env.TEST_ADMIN_EMAIL;
-  if (!testAdminEmail) {
-    console.log('[global-setup] TEST_ADMIN_EMAIL not set, skipping admin setup');
-    return;
-  }
-
+async function ensureTestSpace(
+  ctx: APIRequestContext,
+  superAdminToken: string,
+): Promise<string | undefined> {
   try {
-    const usersResponse = await apiRequest(
-      baseURL,
-      'GET',
-      `/admin/users?role=admin&limit=100`,
-      superAdminToken,
+    const spacesData = await api.listSpaces(ctx, superAdminToken);
+    const testSpace = spacesData.items?.find(
+      (s) => s.spaceName === 'e2e-test-space',
     );
-
-    if (usersResponse.ok) {
-      const usersData = (await usersResponse.json()) as { items: Array<{ email: string }> };
-      const existingAdmin = usersData.items?.find(
-        (u: { email: string }) => u.email === testAdminEmail,
-      );
-      if (existingAdmin) {
-        console.log(`[global-setup] Test admin ${testAdminEmail} already exists`);
-        return;
-      }
+    if (testSpace) {
+      console.log(`[global-setup] Test space already exists: ${testSpace.spaceId}`);
+      return testSpace.spaceId;
     }
 
-    console.log(`[global-setup] Inviting test admin ${testAdminEmail}`);
-    const inviteResponse = await apiRequest(baseURL, 'POST', '/admin/invite-admin', superAdminToken, {
-      email: testAdminEmail,
-    });
-
-    if (inviteResponse.ok || inviteResponse.status === 409) {
-      console.log(`[global-setup] Test admin invitation sent or already exists`);
-    } else {
-      console.warn(
-        `[global-setup] Failed to invite test admin: ${inviteResponse.status} ${inviteResponse.statusText}`,
-      );
-    }
+    console.log('[global-setup] Creating test space: e2e-test-space');
+    const created = await api.createSpace(ctx, superAdminToken, 'e2e-test-space');
+    console.log(`[global-setup] Test space created: ${created.spaceId}`);
+    return created.spaceId;
   } catch (error) {
-    console.warn(`[global-setup] Error setting up test admin: ${error}`);
+    console.warn(`[global-setup] Error with test space: ${error}`);
   }
+  return undefined;
 }
 
-async function ensureTestCustomer(baseURL: string, superAdminToken: string): Promise<void> {
-  const testCustomerEmail = process.env.TEST_CUSTOMER_EMAIL;
-  if (!testCustomerEmail) {
-    console.log('[global-setup] TEST_CUSTOMER_EMAIL not set, skipping customer setup');
-    return;
+async function ensureTestReports(
+  ctx: APIRequestContext,
+  superAdminToken: string,
+  spaceId: string,
+): Promise<string | undefined> {
+  try {
+    const reportsData = await api.listReports(ctx, superAdminToken, spaceId);
+    if (reportsData.items?.length > 0) {
+      console.log(`[global-setup] Reports already exist (${reportsData.items.length} reports)`);
+      return reportsData.items[0].reportId;
+    }
+
+    // Upload HTML report
+    console.log('[global-setup] Uploading: architecture-review.html');
+    const htmlFile = path.resolve(__dirname, 'fixtures', 'reports', 'architecture-review.html');
+    const htmlContent = fs.readFileSync(htmlFile);
+    const htmlReport = await api.uploadReport(ctx, superAdminToken, spaceId, 'architecture-review.html', htmlContent);
+    console.log(`[global-setup] HTML report uploaded: ${htmlReport.reportId}`);
+
+    // Upload PDF report
+    const pdfFile = path.resolve(__dirname, 'fixtures', 'reports', 'security-assessment.pdf');
+    if (fs.existsSync(pdfFile)) {
+      console.log('[global-setup] Uploading: security-assessment.pdf');
+      const pdfContent = fs.readFileSync(pdfFile);
+      const pdfReport = await api.uploadReport(ctx, superAdminToken, spaceId, 'security-assessment.pdf', pdfContent);
+      console.log(`[global-setup] PDF report uploaded: ${pdfReport.reportId}`);
+    }
+
+    return htmlReport.reportId;
+  } catch (error) {
+    console.warn(`[global-setup] Error uploading reports: ${error}`);
+  }
+  return undefined;
+}
+
+async function ensureCustomerInSpace(
+  ctx: APIRequestContext,
+  superAdminToken: string,
+  spaceId: string,
+  customerEmail: string,
+): Promise<void> {
+  try {
+    const usersData = await api.listUsers(ctx, superAdminToken, {
+      role: 'customer',
+      spaceId,
+      limit: 100,
+    });
+    if (usersData.items?.find((u) => u.email === customerEmail)) {
+      console.log(`[global-setup] Customer ${customerEmail} already in space`);
+      return;
+    }
+  } catch {
+    // Continue to invite
   }
 
   try {
-    // Ensure at least one space exists for the test customer
-    const spacesResponse = await apiRequest(baseURL, 'GET', '/admin/spaces?limit=10', superAdminToken);
-    let spaceId: string | undefined;
-
-    if (spacesResponse.ok) {
-      const spacesData = (await spacesResponse.json()) as {
-        items: Array<{ spaceId: string; spaceName: string }>;
-      };
-      const testSpace = spacesData.items?.find(
-        (s: { spaceName: string }) => s.spaceName === 'e2e-test-space',
-      );
-      if (testSpace) {
-        spaceId = testSpace.spaceId;
-        console.log(`[global-setup] Test space already exists: ${spaceId}`);
-      }
-    }
-
-    if (!spaceId) {
-      console.log('[global-setup] Creating test space: e2e-test-space');
-      const createResponse = await apiRequest(baseURL, 'POST', '/admin/spaces', superAdminToken, {
-        name: 'e2e-test-space',
-      });
-      if (createResponse.ok) {
-        const createData = (await createResponse.json()) as { spaceId: string };
-        spaceId = createData.spaceId;
-        console.log(`[global-setup] Test space created: ${spaceId}`);
-      } else if (createResponse.status === 409) {
-        console.log('[global-setup] Test space already exists (409)');
-      } else {
-        console.warn(
-          `[global-setup] Failed to create test space: ${createResponse.status} ${createResponse.statusText}`,
-        );
-        return;
-      }
-    }
-
-    if (spaceId) {
-      // Check if customer already exists
-      const usersResponse = await apiRequest(
-        baseURL,
-        'GET',
-        `/admin/users?role=customer&spaceId=${spaceId}&limit=100`,
-        superAdminToken,
-      );
-
-      if (usersResponse.ok) {
-        const usersData = (await usersResponse.json()) as { items: Array<{ email: string }> };
-        const existingCustomer = usersData.items?.find(
-          (u: { email: string }) => u.email === testCustomerEmail,
-        );
-        if (existingCustomer) {
-          console.log(`[global-setup] Test customer ${testCustomerEmail} already exists`);
-          return;
-        }
-      }
-
-      console.log(`[global-setup] Inviting test customer ${testCustomerEmail} to space ${spaceId}`);
-      const inviteResponse = await apiRequest(
-        baseURL,
-        'POST',
-        `/admin/spaces/${spaceId}/invite`,
-        superAdminToken,
-        { email: testCustomerEmail },
-      );
-
-      if (inviteResponse.ok || inviteResponse.status === 409) {
-        console.log('[global-setup] Test customer invitation sent or already exists');
-      } else {
-        console.warn(
-          `[global-setup] Failed to invite test customer: ${inviteResponse.status} ${inviteResponse.statusText}`,
-        );
-      }
-    }
+    console.log(`[global-setup] Inviting customer ${customerEmail} to space ${spaceId}`);
+    await api.inviteUser(ctx, superAdminToken, spaceId, customerEmail);
+    console.log('[global-setup] Customer invitation sent');
   } catch (error) {
-    console.warn(`[global-setup] Error setting up test customer: ${error}`);
+    console.warn(`[global-setup] Customer invite: ${error}`);
+  }
+}
+
+async function ensureAdminInPlatform(
+  ctx: APIRequestContext,
+  superAdminToken: string,
+  adminEmail: string,
+): Promise<void> {
+  try {
+    const usersData = await api.listUsers(ctx, superAdminToken, {
+      role: 'admin',
+      limit: 100,
+    });
+    if (usersData.items?.find((u) => u.email === adminEmail)) {
+      console.log(`[global-setup] Admin ${adminEmail} already exists`);
+      return;
+    }
+  } catch {
+    // Continue to invite
+  }
+
+  try {
+    console.log(`[global-setup] Inviting admin ${adminEmail}`);
+    await api.inviteAdmin(ctx, superAdminToken, adminEmail);
+    console.log('[global-setup] Admin invitation sent');
+  } catch (error) {
+    console.warn(`[global-setup] Admin invite: ${error}`);
   }
 }
 
 async function globalSetup(config: FullConfig): Promise<void> {
   const baseURL = config.projects[0]?.use?.baseURL || process.env.BASE_URL || 'http://localhost:5173';
 
-  console.log('[global-setup] Starting global setup...');
+  console.log('[global-setup] Starting...');
   console.log(`[global-setup] Base URL: ${baseURL}`);
 
-  // Step 1: Verify the base URL is accessible
-  await verifyBaseUrl(baseURL);
+  // Create Playwright API request context (behaves like a browser, passes WAF)
+  const ctx = await playwrightRequest.newContext({
+    baseURL,
+    extraHTTPHeaders: {
+      'User-Agent':
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    },
+  });
 
-  // Step 2: Login as super admin and create test users if needed
-  const superAdminEmail = process.env.SUPER_ADMIN_EMAIL;
-  const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD;
+  const state = loadState();
 
-  if (superAdminEmail && superAdminPassword) {
+  try {
+    // Step 1: Login as super admin
+    const superAdminEmail = process.env.SUPER_ADMIN_EMAIL;
+    const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD;
+
+    if (!superAdminEmail || !superAdminPassword) {
+      console.log('[global-setup] Super admin credentials not set, skipping');
+      return;
+    }
+
+    let superAdminToken: string;
     try {
-      const totpSecret = process.env.SUPER_ADMIN_TOTP_SECRET;
       console.log(`[global-setup] Logging in as super admin: ${superAdminEmail}`);
-      const token = await loginUser(baseURL, superAdminEmail, superAdminPassword, totpSecret);
+      const existingSecret = process.env.SUPER_ADMIN_TOTP_SECRET || state.superAdminTotpSecret;
+      const result = await loginUser(ctx, superAdminEmail, superAdminPassword, existingSecret);
+      superAdminToken = result.token;
 
-      if (token) {
-        await ensureTestAdmin(baseURL, token);
-        await ensureTestCustomer(baseURL, token);
-      } else {
-        console.warn('[global-setup] Super admin login returned no token; skipping user provisioning');
+      if (result.totpSecret && result.totpSecret !== existingSecret) {
+        state.superAdminTotpSecret = result.totpSecret;
+        console.log('[global-setup] Super admin TOTP secret saved');
       }
     } catch (error) {
-      console.warn(`[global-setup] Could not provision test users (non-fatal): ${error}`);
+      console.warn(`[global-setup] Super admin login failed: ${error}`);
+      return;
     }
-  } else {
-    console.log('[global-setup] Super admin credentials not set, skipping user provisioning');
+
+    if (!superAdminToken) {
+      console.warn('[global-setup] No super admin token, skipping provisioning');
+      return;
+    }
+
+    // Step 2: Ensure test space + reports
+    const spaceId = await ensureTestSpace(ctx, superAdminToken);
+    if (spaceId) {
+      state.testSpaceId = spaceId;
+      const reportId = await ensureTestReports(ctx, superAdminToken, spaceId);
+      if (reportId) {
+        state.testReportId = reportId;
+      }
+    }
+
+    // Step 3: Ensure test admin
+    const testAdminEmail = process.env.TEST_ADMIN_EMAIL;
+    const testAdminPassword = process.env.TEST_ADMIN_PASSWORD;
+    if (testAdminEmail) {
+      await ensureAdminInPlatform(ctx, superAdminToken, testAdminEmail);
+
+      if (testAdminPassword) {
+        try {
+          console.log(`[global-setup] Logging in as test admin: ${testAdminEmail}`);
+          const existingSecret = process.env.TEST_ADMIN_TOTP_SECRET || state.testAdminTotpSecret;
+          const result = await loginUser(ctx, testAdminEmail, testAdminPassword, existingSecret);
+          if (result.totpSecret && result.totpSecret !== existingSecret) {
+            state.testAdminTotpSecret = result.totpSecret;
+            console.log('[global-setup] Test admin TOTP secret saved');
+          }
+          console.log('[global-setup] Test admin login successful');
+        } catch (error) {
+          console.warn(`[global-setup] Test admin login failed: ${error}`);
+        }
+      }
+    }
+
+    // Step 4: Ensure test customer in space
+    const testCustomerEmail = process.env.TEST_CUSTOMER_EMAIL;
+    const testCustomerPassword = process.env.TEST_CUSTOMER_PASSWORD;
+    if (testCustomerEmail && spaceId) {
+      await ensureCustomerInSpace(ctx, superAdminToken, spaceId, testCustomerEmail);
+
+      if (testCustomerPassword) {
+        try {
+          console.log(`[global-setup] Logging in as test customer: ${testCustomerEmail}`);
+          const existingSecret = process.env.TEST_CUSTOMER_TOTP_SECRET || state.testCustomerTotpSecret;
+          const result = await loginUser(ctx, testCustomerEmail, testCustomerPassword, existingSecret);
+          if (result.totpSecret && result.totpSecret !== existingSecret) {
+            state.testCustomerTotpSecret = result.totpSecret;
+            console.log('[global-setup] Test customer TOTP secret saved');
+          }
+          console.log('[global-setup] Test customer login successful');
+        } catch (error) {
+          console.warn(`[global-setup] Test customer login failed: ${error}`);
+        }
+      }
+    }
+  } finally {
+    saveState(state);
+    await ctx.dispose();
   }
 
-  console.log('[global-setup] Global setup complete');
+  console.log('[global-setup] Complete');
 }
 
 export default globalSetup;

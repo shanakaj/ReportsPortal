@@ -168,13 +168,13 @@ test.describe('Invitation Flows', () => {
   test.describe('First Login After Invitation', () => {
     test('should show password change form on first login', async ({ page }) => {
       await page.goto(`${BASE_URL}/login`);
-      await page.locator(selectors.auth.emailInput).fill('newly-invited@example.com');
-      await page.locator(selectors.auth.passwordInput).fill('TemporaryPassword1!');
-      await page.locator(selectors.auth.signInButton).click();
+      await page.locator(selectors.login.emailInput).fill('newly-invited@example.com');
+      await page.locator(selectors.login.passwordInput).fill('TemporaryPassword1!');
+      await page.locator(selectors.login.submitButton).click();
 
-      const newPasswordForm = page.locator(selectors.auth.newPasswordInput);
+      const newPasswordForm = page.locator(selectors.firstLogin.newPasswordInput);
       const mfaSetup = page.getByText(/mfa|authenticator|setup/i);
-      const errorMessage = page.locator(selectors.auth.errorMessage);
+      const errorMessage = page.locator(selectors.login.errorMessage);
 
       await expect(newPasswordForm.or(mfaSetup).or(errorMessage)).toBeVisible({ timeout: 15_000 });
     });

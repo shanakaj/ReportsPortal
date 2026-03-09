@@ -90,7 +90,7 @@ test.describe('Super Admin Journey', () => {
       await dialog.locator(selectors.createSpace.submitButton).click();
 
       // Should show validation error
-      const error = dialog.locator(selectors.auth.errorMessage).or(dialog.locator('[role="alert"]'));
+      const error = dialog.locator(selectors.login.errorMessage).or(dialog.locator('[role="alert"]'));
       await expect(error).toBeVisible({ timeout: 5_000 });
     });
 
