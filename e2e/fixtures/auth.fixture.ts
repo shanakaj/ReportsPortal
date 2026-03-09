@@ -1,5 +1,7 @@
 import { test as base, expect, Page, BrowserContext, APIRequestContext } from '@playwright/test';
 import * as api from '../helpers/api';
+import fs from 'fs';
+import path from 'path';
 
 /**
  * Extended test fixtures providing pre-authenticated pages for each role.
@@ -7,7 +9,7 @@ import * as api from '../helpers/api';
  * Each fixture logs in via the API (not UI) for speed, stores the tokens,
  * and injects them into the page context via localStorage/cookies before navigation.
  *
- * MFA is handled programmatically using TOTP secrets from env vars.
+ * MFA is handled programmatically using TOTP secrets from env vars or .auth-state.json.
  */
 export interface AuthFixtures {
   // Tokens
@@ -27,6 +29,23 @@ export interface AuthFixtures {
 }
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
+const STATE_FILE = path.resolve(__dirname, '..', '.auth-state.json');
+
+interface AuthState {
+  superAdminTotpSecret?: string;
+  testAdminTotpSecret?: string;
+  testCustomerTotpSecret?: string;
+  testSpaceId?: string;
+  testReportId?: string;
+}
+
+function loadAuthState(): AuthState {
+  try {
+    return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
 
 async function loginAndGetToken(
   request: APIRequestContext,
@@ -36,7 +55,8 @@ async function loginAndGetToken(
 ): Promise<string> {
   try {
     const response = await api.loginWithMfa(request, email, password, totpSecret);
-    return response.accessToken || response.idToken || '';
+    // Use idToken for API Gateway Cognito Authorizer (not accessToken)
+    return response.idToken || response.accessToken || '';
   } catch (err) {
     console.warn(`[auth.fixture] Login failed for ${email}: ${err}`);
     return '';
@@ -56,25 +76,28 @@ async function injectAuthTokens(page: Page, token: string, idToken?: string): Pr
 
 export const test = base.extend<AuthFixtures>({
   superAdminToken: async ({ request }, use) => {
+    const state = loadAuthState();
     const email = process.env.SUPER_ADMIN_EMAIL || 'superadmin@versent.com.au';
     const password = process.env.SUPER_ADMIN_PASSWORD || 'TestPassword123!';
-    const totpSecret = process.env.SUPER_ADMIN_TOTP_SECRET;
+    const totpSecret = process.env.SUPER_ADMIN_TOTP_SECRET || state.superAdminTotpSecret;
     const token = await loginAndGetToken(request, email, password, totpSecret);
     await use(token);
   },
 
   adminToken: async ({ request }, use) => {
-    const email = process.env.TEST_ADMIN_EMAIL || 'admin@versent.com.au';
-    const password = process.env.TEST_ADMIN_PASSWORD || 'TestPassword123!';
-    const totpSecret = process.env.TEST_ADMIN_TOTP_SECRET;
+    const state = loadAuthState();
+    const email = process.env.TEST_ADMIN_EMAIL || 'test.admin@versent.com.au';
+    const password = process.env.TEST_ADMIN_PASSWORD || 'TestAdmin@2026!';
+    const totpSecret = process.env.TEST_ADMIN_TOTP_SECRET || state.testAdminTotpSecret;
     const token = await loginAndGetToken(request, email, password, totpSecret);
     await use(token);
   },
 
   customerToken: async ({ request }, use) => {
-    const email = process.env.TEST_CUSTOMER_EMAIL || 'customer@example.com';
-    const password = process.env.TEST_CUSTOMER_PASSWORD || 'TestPassword123!';
-    const totpSecret = process.env.TEST_CUSTOMER_TOTP_SECRET;
+    const state = loadAuthState();
+    const email = process.env.TEST_CUSTOMER_EMAIL || 'test.customer@example.com.au';
+    const password = process.env.TEST_CUSTOMER_PASSWORD || 'TestCustomer@2026!';
+    const totpSecret = process.env.TEST_CUSTOMER_TOTP_SECRET || state.testCustomerTotpSecret;
     const token = await loginAndGetToken(request, email, password, totpSecret);
     await use(token);
   },

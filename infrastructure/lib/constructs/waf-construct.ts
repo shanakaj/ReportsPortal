@@ -46,6 +46,8 @@ export class WafWebAcl extends Construct {
               { name: 'SizeRestrictions_BODY' },
               { name: 'CrossSiteScripting_BODY' },
               { name: 'NoUserAgent_HEADER' },
+              // Exclude body inspection rules that flag passwords with special characters
+              { name: 'GenericRFI_BODY' },
             ],
           },
         },

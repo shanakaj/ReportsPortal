@@ -52,6 +52,9 @@ docker-compose.override.yml
 *.key
 credentials.json
 
+# E2E test state
+.auth-state.json
+
 # Terraform (should not exist, but just in case)
 .terraform/
 *.tfstate
