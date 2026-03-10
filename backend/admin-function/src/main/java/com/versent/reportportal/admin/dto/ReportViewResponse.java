@@ -4,13 +4,18 @@ import java.time.Instant;
 import java.util.Map;
 
 public record ReportViewResponse(
-        String reportId,
-        String spaceId,
-        String fileName,
+        ReportInfo report,
         String cloudFrontUrl,
         Map<String, String> signedCookies,
-        Instant cookieExpiresAt,
-        Instant uploadedAt,
-        Long fileSize
+        Instant cookieExpiresAt
 ) {
+    public record ReportInfo(
+            String reportId,
+            String spaceId,
+            String fileName,
+            String s3Key,
+            Instant uploadedAt,
+            Long fileSize
+    ) {
+    }
 }

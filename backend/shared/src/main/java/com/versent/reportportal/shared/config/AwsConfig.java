@@ -9,6 +9,7 @@ import software.amazon.awssdk.services.eventbridge.EventBridgeClient;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.ses.SesClient;
+import software.amazon.awssdk.services.ssm.SsmClient;
 
 @Configuration
 public class AwsConfig {
@@ -47,6 +48,13 @@ public class AwsConfig {
     @Bean
     public EventBridgeClient eventBridgeClient() {
         return EventBridgeClient.builder()
+                .region(Region.of(region))
+                .build();
+    }
+
+    @Bean
+    public SsmClient ssmClient() {
+        return SsmClient.builder()
                 .region(Region.of(region))
                 .build();
     }

@@ -106,6 +106,7 @@ export function ReportViewer({ spaceId, reportId, isAdmin = false }: ReportViewe
       return (
         <iframe
           ref={iframeRef}
+          data-testid="report-iframe"
           src={data.cloudFrontUrl}
           className="h-full w-full rounded-md border"
           sandbox={category === 'html' ? 'allow-scripts allow-same-origin' : undefined}
@@ -132,16 +133,17 @@ export function ReportViewer({ spaceId, reportId, isAdmin = false }: ReportViewe
   };
 
   return (
-    <div className="relative h-[calc(100vh-200px)]">
+    <div data-testid="report-viewer" className="relative h-[calc(100vh-200px)]">
       {sessionExpired && <SessionExpiredOverlay />}
 
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-medium text-muted-foreground">
+        <h3 data-testid="report-title" className="text-sm font-medium text-muted-foreground">
           {data.report.fileName}
         </h3>
         <div className="flex items-center gap-2">
           {canViewInline && (
             <Button
+              data-testid="open-full-tab"
               variant="outline"
               size="sm"
               onClick={() => window.open(`/report/${spaceId}/${reportId}`, '_blank')}

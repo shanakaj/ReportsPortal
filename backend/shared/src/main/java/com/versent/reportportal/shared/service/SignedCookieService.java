@@ -4,6 +4,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import software.amazon.awssdk.services.ssm.SsmClient;
+import software.amazon.awssdk.services.ssm.model.GetParameterRequest;
+import software.amazon.awssdk.services.ssm.model.GetParameterResponse;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -27,21 +30,29 @@ public class SignedCookieService {
     private final String cloudFrontDomain;
     private final String cloudFrontKeyPairId;
     private final String privateKeyPath;
+    private final String privateKeySsmParam;
+    private final SsmClient ssmClient;
+    private volatile PrivateKey cachedPrivateKey;
 
     public SignedCookieService(
             @Value("${cloudfront.domain:reports.yourdomain.com}") String cloudFrontDomain,
             @Value("${cloudfront.key-pair-id:PLACEHOLDER}") String cloudFrontKeyPairId,
-            @Value("${cloudfront.private-key-path:/opt/keys/cloudfront-private-key.pem}") String privateKeyPath) {
+            @Value("${cloudfront.private-key-path:/opt/keys/cloudfront-private-key.pem}") String privateKeyPath,
+            @Value("${cloudfront.private-key-ssm-param:}") String privateKeySsmParam,
+            SsmClient ssmClient) {
         this.cloudFrontDomain = cloudFrontDomain;
         this.cloudFrontKeyPairId = cloudFrontKeyPairId;
         this.privateKeyPath = privateKeyPath;
+        this.privateKeySsmParam = privateKeySsmParam;
+        this.ssmClient = ssmClient;
     }
 
     public SignedCookieResult generateSignedCookies(String spaceId) {
         Instant expiresAt = Instant.now().plus(COOKIE_TTL_HOURS, ChronoUnit.HOURS);
         long epochSeconds = expiresAt.getEpochSecond();
 
-        String resourcePath = "https://" + cloudFrontDomain + "/reports/report-portal-" + spaceId + "/*";
+        // Resource path scoped to the space — matches /reports/{spaceId}/* in CloudFront
+        String resourcePath = "https://" + cloudFrontDomain + "/reports/" + spaceId + "/*";
 
         String policy = String.format(
                 "{\"Statement\":[{\"Resource\":\"%s\",\"Condition\":{\"DateLessThan\":{\"AWS:EpochTime\":%d}}}]}",
@@ -79,12 +90,37 @@ public class SignedCookieService {
     }
 
     private PrivateKey loadPrivateKey() throws Exception {
-        String pemContent;
-        try {
-            pemContent = Files.readString(Path.of(privateKeyPath));
-        } catch (IOException e) {
-            log.warn("Private key file not found at {}, using placeholder for development", privateKeyPath);
-            return generatePlaceholderKey();
+        if (cachedPrivateKey != null) {
+            return cachedPrivateKey;
+        }
+
+        String pemContent = null;
+
+        // Try SSM parameter first
+        if (privateKeySsmParam != null && !privateKeySsmParam.isEmpty()) {
+            try {
+                GetParameterResponse response = ssmClient.getParameter(
+                        GetParameterRequest.builder()
+                                .name(privateKeySsmParam)
+                                .withDecryption(true)
+                                .build());
+                pemContent = response.parameter().value();
+                log.info("Loaded CloudFront private key from SSM parameter: {}", privateKeySsmParam);
+            } catch (Exception e) {
+                log.warn("Failed to load private key from SSM param {}: {}", privateKeySsmParam, e.getMessage());
+            }
+        }
+
+        // Fall back to file
+        if (pemContent == null) {
+            try {
+                pemContent = Files.readString(Path.of(privateKeyPath));
+                log.info("Loaded CloudFront private key from file: {}", privateKeyPath);
+            } catch (IOException e) {
+                log.warn("Private key file not found at {}, using placeholder for development", privateKeyPath);
+                cachedPrivateKey = generatePlaceholderKey();
+                return cachedPrivateKey;
+            }
         }
 
         String privateKeyPEM = pemContent
@@ -97,7 +133,8 @@ public class SignedCookieService {
         byte[] keyBytes = Base64.getDecoder().decode(privateKeyPEM);
         PKCS8EncodedKeySpec spec = new PKCS8EncodedKeySpec(keyBytes);
         KeyFactory kf = KeyFactory.getInstance("RSA");
-        return kf.generatePrivate(spec);
+        cachedPrivateKey = kf.generatePrivate(spec);
+        return cachedPrivateKey;
     }
 
     private PrivateKey generatePlaceholderKey() throws Exception {

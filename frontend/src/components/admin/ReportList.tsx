@@ -94,11 +94,11 @@ export function ReportList({ spaceId }: ReportListProps) {
           {reports.map((report) => {
             const viewable = isViewableInline(report.fileName);
             return (
-              <TableRow key={report.reportId}>
+              <TableRow key={report.reportId} data-testid={`report-row-${report.reportId}`}>
                 <TableCell>
                   <div className="flex items-center gap-2">
                     <ReportFileIcon fileName={report.fileName} />
-                    <span className="font-medium">{report.fileName}</span>
+                    <span data-testid="report-name" className="font-medium">{report.fileName}</span>
                   </div>
                 </TableCell>
                 <TableCell className="text-muted-foreground">
@@ -112,6 +112,7 @@ export function ReportList({ spaceId }: ReportListProps) {
                     {viewable && (
                       <>
                         <Button
+                          data-testid="view-report"
                           variant="ghost"
                           size="icon"
                           onClick={() =>

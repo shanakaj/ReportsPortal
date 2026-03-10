@@ -24,6 +24,12 @@ dynamodb:
     notifications: ${NOTIFICATIONS_TABLE:ReportPortal-Notifications}
     platform-settings: ${PLATFORM_SETTINGS_TABLE:ReportPortal-PlatformSettings}
 
+cloudfront:
+  domain: ${CLOUDFRONT_DOMAIN:reports.yourdomain.com}
+  key-pair-id: ${CLOUDFRONT_KEY_PAIR_ID:PLACEHOLDER}
+  private-key-path: ${CLOUDFRONT_PRIVATE_KEY_PATH:/opt/keys/cloudfront-private-key.pem}
+  private-key-ssm-param: ${CLOUDFRONT_PRIVATE_KEY_SSM_PARAM:}
+
 ses:
   from-address: ${SES_FROM_ADDRESS:noreply@reports.yourdomain.com}
 

@@ -39,15 +39,13 @@ public class CustomerService {
     private final DynamoDbTable<ReportEntity> reportTable;
     private final SignedCookieService signedCookieService;
     private final AuditService auditService;
-    private final String cloudFrontDomain;
 
     public CustomerService(DynamoDbEnhancedClient dynamoDbEnhancedClient,
                            SignedCookieService signedCookieService,
                            AuditService auditService,
                            @Value("${dynamodb.tables.users:ReportPortal-Users}") String userTableName,
                            @Value("${dynamodb.tables.spaces:ReportPortal-Spaces}") String spaceTableName,
-                           @Value("${dynamodb.tables.reports:ReportPortal-Reports}") String reportTableName,
-                           @Value("${cloudfront.domain:reports.yourdomain.com}") String cloudFrontDomain) {
+                           @Value("${dynamodb.tables.reports:ReportPortal-Reports}") String reportTableName) {
         this.userTable = dynamoDbEnhancedClient.table(userTableName,
                 TableSchema.fromBean(UserEntity.class));
         this.spaceTable = dynamoDbEnhancedClient.table(spaceTableName,
@@ -56,7 +54,6 @@ public class CustomerService {
                 TableSchema.fromBean(ReportEntity.class));
         this.signedCookieService = signedCookieService;
         this.auditService = auditService;
-        this.cloudFrontDomain = cloudFrontDomain;
     }
 
     public List<CustomerSpaceResponse> listSpaces() {
@@ -147,20 +144,25 @@ public class CustomerService {
 
         SignedCookieService.SignedCookieResult cookieResult = signedCookieService.generateSignedCookies(spaceId);
 
-        String cloudFrontUrl = "https://" + cloudFrontDomain + "/reports/" + report.getS3Key();
+        // Return relative path — the SPA is served from the same CloudFront distribution
+        // S3 serving bucket stores files as {spaceId}/{reportId}/{fileName}
+        String reportPath = "/reports/" + spaceId + "/" + report.getS3Key();
 
         auditService.logEvent(currentUser.userId(), currentUser.email(),
                 "REPORT_VIEWED", spaceId + "/" + reportId, "SUCCESS");
 
         return new ReportViewResponse(
-                report.getReportId(),
-                report.getSpaceId(),
-                report.getFileName(),
-                cloudFrontUrl,
+                new ReportViewResponse.ReportInfo(
+                        report.getReportId(),
+                        report.getSpaceId(),
+                        report.getFileName(),
+                        report.getS3Key(),
+                        report.getUploadedAt(),
+                        report.getFileSize()
+                ),
+                reportPath,
                 cookieResult.cookies(),
-                cookieResult.expiresAt(),
-                report.getUploadedAt(),
-                report.getFileSize()
+                cookieResult.expiresAt()
         );
     }
 

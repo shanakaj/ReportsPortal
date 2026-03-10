@@ -119,6 +119,7 @@ export function FullTabReportPage() {
       return (
         <iframe
           ref={iframeRef}
+          data-testid="report-iframe"
           src={data.cloudFrontUrl}
           className="h-full w-full border-none"
           sandbox={category === 'html' ? 'allow-scripts allow-same-origin' : undefined}
@@ -146,13 +147,13 @@ export function FullTabReportPage() {
   };
 
   return (
-    <div className="relative h-screen w-screen">
+    <div data-testid="full-tab-view" className="relative h-screen w-screen">
       {sessionExpired && <SessionExpiredOverlay />}
 
       {renderContent()}
 
       {/* Floating toolbar */}
-      <div className="fixed top-4 left-4 z-40 flex items-center gap-2 rounded-lg bg-card/95 backdrop-blur border px-4 py-2 shadow-lg">
+      <div data-testid="floating-toolbar" className="fixed top-4 left-4 z-40 flex items-center gap-2 rounded-lg bg-card/95 backdrop-blur border px-4 py-2 shadow-lg">
         <span className="text-sm font-medium max-w-[200px] truncate">
           {data.report.fileName}
         </span>
@@ -176,6 +177,7 @@ export function FullTabReportPage() {
           </Button>
         )}
         <Button
+          data-testid="feedback-toggle"
           variant={showFeedback ? 'default' : 'ghost'}
           size="sm"
           onClick={() => setShowFeedback(!showFeedback)}
