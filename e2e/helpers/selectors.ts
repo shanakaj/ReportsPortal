@@ -46,7 +46,7 @@ export const selectors = {
   nav: {
     sidebar: '[data-testid="sidebar"], nav[role="navigation"], aside',
     dashboardLink: '[data-testid="nav-dashboard"], a:has-text("Dashboard")',
-    spacesLink: '[data-testid="nav-spaces"], a:has-text("Spaces"), a:has-text("Customers")',
+    spacesLink: '[data-testid="nav-spaces"], nav a:has-text("Spaces"), aside a:has-text("Spaces"), a:has-text("Customers")',
     usersLink: '[data-testid="nav-users"], a:has-text("Users")',
     analyticsLink: '[data-testid="nav-analytics"], a:has-text("Analytics")',
     auditLogLink: '[data-testid="nav-audit-log"], [data-testid="nav-audit"], a:has-text("Audit Log"), a:has-text("Audit")',
@@ -84,7 +84,7 @@ export const selectors = {
 
   // ─── Create Space Dialog ──────────────────────────────────────────────
   createSpace: {
-    dialog: '[data-testid="create-space-dialog"], [role="dialog"]',
+    dialog: '[data-testid="create-space-dialog"], [role="dialog"], div.fixed:has(button:has-text("Create Space"))',
     nameInput: '[data-testid="space-name-input"], input[name="spaceName"], input[name="name"], input[aria-label*="name" i]',
     nameInfoTooltip: '[data-testid="space-name-info"]',
     submitButton: '[data-testid="create-space-submit"], button:has-text("Create"), button:has-text("Save"), button[type="submit"]',

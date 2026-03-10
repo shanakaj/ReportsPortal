@@ -88,6 +88,12 @@ public class AdminHandler {
         return ResponseEntity.status(HttpStatus.CREATED).body(spaceService.createSpace(request));
     }
 
+    @GetMapping("/spaces/{spaceId}")
+    public ResponseEntity<SpaceResponse> getSpace(@PathVariable String spaceId) {
+        roleChecker.requireAdmin();
+        return ResponseEntity.ok(spaceService.getSpace(spaceId));
+    }
+
     @DeleteMapping("/spaces/{spaceId}")
     public ResponseEntity<Void> deleteSpace(@PathVariable String spaceId) {
         roleChecker.requireSuperAdmin();
