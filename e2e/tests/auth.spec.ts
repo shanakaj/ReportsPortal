@@ -81,7 +81,7 @@ test.describe('Authentication Flows', () => {
   test.describe('Admin Login', () => {
     test('should login and redirect to admin area or MFA', async ({ page }) => {
       await page.goto(`${BASE_URL}/login`);
-      const email = process.env.TEST_ADMIN_EMAIL || 'admin@versent.com.au';
+      const email = process.env.TEST_ADMIN_EMAIL || 'testpr.admin@versent.com.au';
       const password = process.env.TEST_ADMIN_PASSWORD || 'TestPassword123!';
 
       await page.locator(selectors.login.emailInput).fill(email);
@@ -95,7 +95,7 @@ test.describe('Authentication Flows', () => {
   test.describe('Customer Login', () => {
     test('should login and redirect to customer area or MFA', async ({ page }) => {
       await page.goto(`${BASE_URL}/login`);
-      const email = process.env.TEST_CUSTOMER_EMAIL || 'customer@example.com';
+      const email = process.env.TEST_CUSTOMER_EMAIL || 'testpr.customer@example.com.au';
       const password = process.env.TEST_CUSTOMER_PASSWORD || 'TestPassword123!';
 
       await page.locator(selectors.login.emailInput).fill(email);

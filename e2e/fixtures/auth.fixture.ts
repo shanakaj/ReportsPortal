@@ -127,7 +127,7 @@ export const test = base.extend<AuthFixtures>({
 
   adminToken: async ({ request }, use) => {
     const state = loadAuthState();
-    const email = process.env.TEST_ADMIN_EMAIL || 'test.admin@versent.com.au';
+    const email = process.env.TEST_ADMIN_EMAIL || 'testpr.admin@versent.com.au';
     const password = process.env.TEST_ADMIN_PASSWORD || 'TestAdmin@2026!';
     const totpSecret = process.env.TEST_ADMIN_TOTP_SECRET || state.testAdminTotpSecret;
     const tokens = await loginAndGetTokens(request, email, password, totpSecret);
@@ -136,7 +136,7 @@ export const test = base.extend<AuthFixtures>({
 
   customerToken: async ({ request }, use) => {
     const state = loadAuthState();
-    const email = process.env.TEST_CUSTOMER_EMAIL || 'test.customer@example.com.au';
+    const email = process.env.TEST_CUSTOMER_EMAIL || 'testpr.customer@example.com.au';
     const password = process.env.TEST_CUSTOMER_PASSWORD || 'TestCustomer@2026!';
     const totpSecret = process.env.TEST_CUSTOMER_TOTP_SECRET || state.testCustomerTotpSecret;
     const tokens = await loginAndGetTokens(request, email, password, totpSecret);
@@ -177,7 +177,7 @@ export const test = base.extend<AuthFixtures>({
 
   adminPage: async ({ adminContext, request }, use) => {
     const state = loadAuthState();
-    const email = process.env.TEST_ADMIN_EMAIL || 'test.admin@versent.com.au';
+    const email = process.env.TEST_ADMIN_EMAIL || 'testpr.admin@versent.com.au';
     const password = process.env.TEST_ADMIN_PASSWORD || 'TestAdmin@2026!';
     const totpSecret = process.env.TEST_ADMIN_TOTP_SECRET || state.testAdminTotpSecret;
     const tokens = await loginAndGetTokens(request, email, password, totpSecret);
@@ -191,7 +191,7 @@ export const test = base.extend<AuthFixtures>({
 
   customerPage: async ({ customerContext, request }, use) => {
     const state = loadAuthState();
-    const email = process.env.TEST_CUSTOMER_EMAIL || 'test.customer@example.com.au';
+    const email = process.env.TEST_CUSTOMER_EMAIL || 'testpr.customer@example.com.au';
     const password = process.env.TEST_CUSTOMER_PASSWORD || 'TestCustomer@2026!';
     const totpSecret = process.env.TEST_CUSTOMER_TOTP_SECRET || state.testCustomerTotpSecret;
     const tokens = await loginAndGetTokens(request, email, password, totpSecret);
