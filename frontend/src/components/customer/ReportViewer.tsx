@@ -25,6 +25,16 @@ export function ReportViewer({ spaceId, reportId, isAdmin = false }: ReportViewe
     queryFn: () => getReport(spaceId, reportId, isAdmin),
   });
 
+  // Set CloudFront signed cookies so the browser can access report content
+  const [cookiesReady, setCookiesReady] = useState(false);
+  useEffect(() => {
+    if (!data?.signedCookies) return;
+    Object.entries(data.signedCookies).forEach(([name, value]) => {
+      document.cookie = `${name}=${value}; path=/; secure; samesite=none`;
+    });
+    setCookiesReady(true);
+  }, [data]);
+
   useAnalyticsBridge({
     spaceId,
     reportId,
@@ -72,6 +82,9 @@ export function ReportViewer({ spaceId, reportId, isAdmin = false }: ReportViewe
   }
 
   if (!data) return null;
+  if (!cookiesReady) {
+    return <Skeleton className="h-[calc(100vh-200px)] w-full" />;
+  }
 
   const category = getFileTypeCategory(data.report.fileName);
   const canViewInline = isViewableInline(data.report.fileName);

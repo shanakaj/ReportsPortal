@@ -62,6 +62,35 @@ test.describe('Super Admin Journey', () => {
       await expect(success).toBeVisible({ timeout: 10_000 });
     });
 
+    test('should create a space and navigate into it successfully', async ({ superAdminPage: page }) => {
+      const spaceName = `e2e-verify-${Date.now()}`;
+      await page.goto(BASE_URL);
+      await page.locator(selectors.nav.spacesLink).click();
+      await expect(page.locator(selectors.spaceList.container)).toBeVisible({ timeout: 10_000 });
+
+      await page.locator(selectors.spaceList.createButton).click();
+      const dialog = page.locator(selectors.createSpace.dialog);
+      await expect(dialog).toBeVisible({ timeout: 5_000 });
+
+      await dialog.locator(selectors.createSpace.nameInput).fill(spaceName);
+      await dialog.locator(selectors.createSpace.submitButton).click({ force: true });
+
+      // Should see new space in the list (not a 500 error)
+      const success = page.locator(selectors.common.toastSuccess).or(page.getByText(spaceName));
+      const error = page.getByText(/500|failed|error/i);
+      await expect(success).toBeVisible({ timeout: 15_000 });
+      await expect(error).not.toBeVisible({ timeout: 2_000 });
+
+      // Click into the newly created space
+      const newSpaceCard = page.locator(selectors.spaceList.spaceCard).filter({ hasText: spaceName }).first();
+      if (await newSpaceCard.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        await newSpaceCard.click();
+        // Should load space detail, not "Space not found"
+        await expect(page.locator(selectors.spaceDetail.container)).toBeVisible({ timeout: 10_000 });
+        await expect(page.getByText('Space not found')).not.toBeVisible({ timeout: 3_000 });
+      }
+    });
+
     test('should show space name info label (domain matching guidance)', async ({ superAdminPage: page }) => {
       await page.goto(BASE_URL);
       await page.locator(selectors.nav.spacesLink).click();
@@ -106,16 +135,24 @@ test.describe('Super Admin Journey', () => {
       }
     });
 
-    test('should navigate into a space and see reports', async ({ superAdminPage: page }) => {
+    test('should navigate into a space and see space detail page', async ({ superAdminPage: page }) => {
       await page.goto(BASE_URL);
       await page.locator(selectors.nav.spacesLink).click();
       await expect(page.locator(selectors.spaceList.container)).toBeVisible({ timeout: 10_000 });
 
       const spaceCard = page.locator(selectors.spaceList.spaceCard).first();
-      if (await spaceCard.isVisible({ timeout: 5_000 }).catch(() => false)) {
-        await spaceCard.click();
-        await expect(page.locator(selectors.spaceDetail.container)).toBeVisible({ timeout: 10_000 });
+      if (!(await spaceCard.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        test.skip();
+        return;
       }
+
+      // Get the space name before clicking
+      const spaceName = await spaceCard.innerText();
+      await spaceCard.click();
+
+      // Space detail page should load (not "Space not found")
+      await expect(page.locator(selectors.spaceDetail.container)).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText('Space not found')).not.toBeVisible({ timeout: 3_000 });
     });
 
     test('should delete a customer space (super admin only)', async ({ superAdminPage: page }) => {

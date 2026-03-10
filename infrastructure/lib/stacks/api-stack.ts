@@ -92,6 +92,8 @@ export class ApiStack extends cdk.Stack {
       PORTAL_DOMAIN: envConfig.domainName,
       ADMIN_DOMAIN: envConfig.adminDomainName,
       PLATFORM_SETTINGS_TABLE: platformSettingsTable.tableName,
+      AWS_ACCOUNT_ID: cdk.Aws.ACCOUNT_ID,
+      APP_AWS_REGION: cdk.Aws.REGION,
     };
 
     const backendCodePath = '../backend';
@@ -351,13 +353,13 @@ export class ApiStack extends cdk.Stack {
         's3:PutBucketLogging',
         's3:PutBucketCors',
       ],
-      resources: [`arn:aws:s3:::report-portal-*`],
+      resources: [`arn:aws:s3:::report-portal-*`, `arn:aws:s3:::rp-*`],
     }));
     // Presigned URL generation for customer space buckets
     adminFunction.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ['s3:PutObject', 's3:GetObject', 's3:DeleteObject'],
-      resources: [`arn:aws:s3:::report-portal-*/*`],
+      resources: [`arn:aws:s3:::report-portal-*/*`, `arn:aws:s3:::rp-*/*`],
     }));
 
     // Customer function: users, spaces, reports, analytics, audit + CloudFront signed cookies

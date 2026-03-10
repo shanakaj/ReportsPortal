@@ -49,8 +49,8 @@ public class SpaceService {
                         S3Client s3Client,
                         AuditService auditService,
                         @Value("${dynamodb.tables.spaces:ReportPortal-Spaces}") String tableName,
-                        @Value("${aws.account-id:000000000000}") String awsAccountId,
-                        @Value("${aws.region:ap-southeast-2}") String awsRegion) {
+                        @Value("${AWS_ACCOUNT_ID:000000000000}") String awsAccountId,
+                        @Value("${APP_AWS_REGION:ap-southeast-2}") String awsRegion) {
         this.spaceTable = dynamoDbEnhancedClient.table(tableName,
                 TableSchema.fromBean(SpaceEntity.class));
         this.spaceNameIndex = spaceTable.index("spaceName-index");

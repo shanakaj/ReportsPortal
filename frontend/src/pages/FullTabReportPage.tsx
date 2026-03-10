@@ -27,6 +27,16 @@ export function FullTabReportPage() {
     enabled: !!spaceId && !!reportId,
   });
 
+  // Set CloudFront signed cookies so the browser can access report content
+  const [cookiesReady, setCookiesReady] = useState(false);
+  useEffect(() => {
+    if (!data?.signedCookies) return;
+    Object.entries(data.signedCookies).forEach(([name, value]) => {
+      document.cookie = `${name}=${value}; path=/; secure; samesite=none`;
+    });
+    setCookiesReady(true);
+  }, [data]);
+
   useAnalyticsBridge({
     spaceId: spaceId!,
     reportId: reportId!,
@@ -63,6 +73,14 @@ export function FullTabReportPage() {
   }
 
   if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (!cookiesReady && data) {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
