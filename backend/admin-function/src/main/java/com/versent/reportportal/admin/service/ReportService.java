@@ -50,7 +50,6 @@ public class ReportService {
     private final SpaceService spaceService;
     private final AuditService auditService;
     private final SignedCookieService signedCookieService;
-    private final String cloudFrontDomain;
 
     public ReportService(DynamoDbEnhancedClient dynamoDbEnhancedClient,
                          S3Client s3Client,
@@ -58,8 +57,7 @@ public class ReportService {
                          SpaceService spaceService,
                          AuditService auditService,
                          SignedCookieService signedCookieService,
-                         @Value("${dynamodb.tables.reports:ReportPortal-Reports}") String tableName,
-                         @Value("${cloudfront.domain:reports.yourdomain.com}") String cloudFrontDomain) {
+                         @Value("${dynamodb.tables.reports:ReportPortal-Reports}") String tableName) {
         this.reportTable = dynamoDbEnhancedClient.table(tableName,
                 TableSchema.fromBean(ReportEntity.class));
         this.s3Client = s3Client;
@@ -67,7 +65,6 @@ public class ReportService {
         this.spaceService = spaceService;
         this.auditService = auditService;
         this.signedCookieService = signedCookieService;
-        this.cloudFrontDomain = cloudFrontDomain;
     }
 
     public UploadReportResponse initiateUpload(String spaceId, UploadReportRequest request) {
@@ -192,20 +189,25 @@ public class ReportService {
         }
 
         SignedCookieService.SignedCookieResult cookieResult = signedCookieService.generateSignedCookies(spaceId);
-        String cloudFrontUrl = "https://" + cloudFrontDomain + "/reports/" + report.getS3Key();
+        // Return relative path — the SPA is served from the same CloudFront distribution
+        // S3 serving bucket stores files as {spaceId}/{reportId}/{fileName}
+        String reportPath = "/reports/" + spaceId + "/" + report.getS3Key();
 
         auditService.logEvent(currentUser.userId(), currentUser.email(),
                 "REPORT_VIEWED", spaceId + "/" + reportId, "SUCCESS");
 
         return new ReportViewResponse(
-                report.getReportId(),
-                report.getSpaceId(),
-                report.getFileName(),
-                cloudFrontUrl,
+                new ReportViewResponse.ReportInfo(
+                        report.getReportId(),
+                        report.getSpaceId(),
+                        report.getFileName(),
+                        report.getS3Key(),
+                        report.getUploadedAt(),
+                        report.getFileSize()
+                ),
+                reportPath,
                 cookieResult.cookies(),
-                cookieResult.expiresAt(),
-                report.getUploadedAt(),
-                report.getFileSize()
+                cookieResult.expiresAt()
         );
     }
 

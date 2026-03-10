@@ -94,6 +94,15 @@ export class ApiStack extends cdk.Stack {
       PLATFORM_SETTINGS_TABLE: platformSettingsTable.tableName,
       AWS_ACCOUNT_ID: cdk.Aws.ACCOUNT_ID,
       APP_AWS_REGION: cdk.Aws.REGION,
+      CLOUDFRONT_DOMAIN: cdk.Fn.sub(
+        '{{resolve:ssm:/report-portal/${env}/cloudfront/distribution-domain}}',
+        { env: environmentName }
+      ),
+      CLOUDFRONT_KEY_PAIR_ID: cdk.Fn.sub(
+        '{{resolve:ssm:/report-portal/${env}/cloudfront/key-pair-id}}',
+        { env: environmentName }
+      ),
+      CLOUDFRONT_PRIVATE_KEY_SSM_PARAM: `/report-portal/${environmentName}/cloudfront/private-key-pem`,
     };
 
     const backendCodePath = '../backend';
@@ -360,6 +369,20 @@ export class ApiStack extends cdk.Stack {
       effect: iam.Effect.ALLOW,
       actions: ['s3:PutObject', 's3:GetObject', 's3:DeleteObject'],
       resources: [`arn:aws:s3:::report-portal-*/*`, `arn:aws:s3:::rp-*/*`],
+    }));
+
+    // Admin function: CloudFront signed cookies + SSM access for private key
+    adminFunction.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['cloudfront:CreateSignedUrl', 'cloudfront:CreateSignedCookie'],
+      resources: ['*'],
+    }));
+    adminFunction.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['ssm:GetParameter'],
+      resources: [
+        `arn:aws:ssm:${cdk.Aws.REGION}:${cdk.Aws.ACCOUNT_ID}:parameter/report-portal/${environmentName}/cloudfront/*`,
+      ],
     }));
 
     // Customer function: users, spaces, reports, analytics, audit + CloudFront signed cookies

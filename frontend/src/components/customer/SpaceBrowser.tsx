@@ -42,6 +42,7 @@ export function SpaceBrowser() {
       {spaces.map((space) => (
         <Card
           key={space.spaceId}
+          data-testid="customer-space-card"
           className="cursor-pointer hover:border-primary/50 hover:shadow-md transition-all"
           onClick={() => navigate(`/customer/spaces/${space.spaceId}`)}
         >
