@@ -21,9 +21,9 @@ REGION="${AWS_REGION:-ap-southeast-2}"
 
 SUPER_ADMIN_EMAIL="${SUPER_ADMIN_EMAIL:-shanaka.jayasundera@versent.com.au}"
 SUPER_ADMIN_PASSWORD="${SUPER_ADMIN_PASSWORD:-SuperAdmin@2026!}"
-TEST_ADMIN_EMAIL="${TEST_ADMIN_EMAIL:-test.admin@versent.com.au}"
+TEST_ADMIN_EMAIL="${TEST_ADMIN_EMAIL:-testpr.admin@versent.com.au}"
 TEST_ADMIN_PASSWORD="${TEST_ADMIN_PASSWORD:-TestAdmin@2026!}"
-TEST_CUSTOMER_EMAIL="${TEST_CUSTOMER_EMAIL:-test.customer@example.com.au}"
+TEST_CUSTOMER_EMAIL="${TEST_CUSTOMER_EMAIL:-testpr.customer@example.com.au}"
 TEST_CUSTOMER_PASSWORD="${TEST_CUSTOMER_PASSWORD:-TestCustomer@2026!}"
 
 export AWS_REGION="$REGION"
@@ -109,11 +109,11 @@ echo "[provision] Super admin ready."
 echo ""
 
 # Step 3: Create/reset test admin
-create_user_if_not_exists "$TEST_ADMIN_EMAIL" "$TEST_ADMIN_PASSWORD" "admin" "Test Admin"
+create_user_if_not_exists "$TEST_ADMIN_EMAIL" "$TEST_ADMIN_PASSWORD" "admin" "TestPR Admin"
 echo ""
 
 # Step 4: Create/reset test customer
-create_user_if_not_exists "$TEST_CUSTOMER_EMAIL" "$TEST_CUSTOMER_PASSWORD" "customer" "Test Customer"
+create_user_if_not_exists "$TEST_CUSTOMER_EMAIL" "$TEST_CUSTOMER_PASSWORD" "customer" "TestPR Customer"
 echo ""
 
 echo "============================================"

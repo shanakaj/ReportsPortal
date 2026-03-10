@@ -26,6 +26,12 @@ public class AuditQueryService {
 
     private static final Logger log = LoggerFactory.getLogger(AuditQueryService.class);
 
+    /**
+     * Prefix used by Playwright/E2E test user emails (e.g. testpr.admin@versent.com.au).
+     * Audit entries from these users are excluded from admin-facing query results.
+     */
+    private static final String TEST_USER_EMAIL_PREFIX = "testpr.";
+
     private final DynamoDbTable<AuditLogEntity> auditTable;
 
     public AuditQueryService(DynamoDbEnhancedClient dynamoDbEnhancedClient,
@@ -61,6 +67,8 @@ public class AuditQueryService {
             while (pages.hasNext() && results.size() < limit) {
                 Page<AuditLogEntity> page = pages.next();
                 page.items().stream()
+                        .filter(e -> e.getActorEmail() == null ||
+                                !e.getActorEmail().startsWith(TEST_USER_EMAIL_PREFIX))
                         .filter(e -> actor == null || actor.equals(e.getActor()))
                         .filter(e -> action == null || action.equals(e.getAction()))
                         .filter(e -> spaceId == null || (e.getTarget() != null &&

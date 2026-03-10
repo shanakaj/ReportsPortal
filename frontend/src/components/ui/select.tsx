@@ -4,13 +4,15 @@ import { ChevronDown } from 'lucide-react';
 
 interface SelectContextValue {
   value: string;
-  onValueChange: (value: string) => void;
+  label: string;
+  onValueChange: (value: string, label: string) => void;
   open: boolean;
   setOpen: (open: boolean) => void;
 }
 
 const SelectContext = createContext<SelectContextValue>({
   value: '',
+  label: '',
   onValueChange: () => {},
   open: false,
   setOpen: () => {},
@@ -26,13 +28,19 @@ interface SelectProps {
 
 function Select({ value: controlledValue, defaultValue = '', onValueChange, disabled, children }: SelectProps) {
   const [internalValue, setInternalValue] = useState(defaultValue);
+  const [internalLabel, setInternalLabel] = useState('');
   const [open, setOpen] = useState(false);
   const value = controlledValue ?? internalValue;
-  const handleChange = disabled ? () => {} : (onValueChange ?? setInternalValue);
+  const handleChange = disabled
+    ? () => {}
+    : (v: string, l: string) => {
+        setInternalLabel(l);
+        (onValueChange ?? setInternalValue)(v);
+      };
   const handleSetOpen = disabled ? () => {} : setOpen;
 
   return (
-    <SelectContext.Provider value={{ value, onValueChange: handleChange, open, setOpen: handleSetOpen }}>
+    <SelectContext.Provider value={{ value, label: internalLabel, onValueChange: handleChange, open, setOpen: handleSetOpen }}>
       <div className={cn('relative', disabled && 'pointer-events-none opacity-50')}>{children}</div>
     </SelectContext.Provider>
   );
@@ -61,8 +69,8 @@ function SelectTrigger({ className, children, ...props }: React.ButtonHTMLAttrib
 }
 
 function SelectValue({ placeholder }: { placeholder?: string }) {
-  const { value } = useContext(SelectContext);
-  return <span>{value || placeholder}</span>;
+  const { value, label } = useContext(SelectContext);
+  return <span>{value ? (label || value) : placeholder}</span>;
 }
 
 function SelectContent({ children, className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
@@ -103,16 +111,19 @@ interface SelectItemProps extends React.HTMLAttributes<HTMLDivElement> {
 function SelectItem({ value, children, className, ...props }: SelectItemProps) {
   const { value: selectedValue, onValueChange, setOpen } = useContext(SelectContext);
   const isSelected = value === selectedValue;
+  const ref = useRef<HTMLDivElement>(null);
 
   return (
     <div
+      ref={ref}
       className={cn(
         'relative flex w-full cursor-pointer select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none hover:bg-accent hover:text-accent-foreground',
         isSelected && 'bg-accent text-accent-foreground',
         className,
       )}
       onClick={() => {
-        onValueChange(value);
+        const label = ref.current?.textContent ?? '';
+        onValueChange(value, label);
         setOpen(false);
       }}
       role="option"
