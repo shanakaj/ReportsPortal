@@ -23,6 +23,8 @@ import software.amazon.awssdk.enhanced.dynamodb.model.QueryConditional;
 import software.amazon.awssdk.enhanced.dynamodb.model.QueryEnhancedRequest;
 import software.amazon.awssdk.enhanced.dynamodb.model.ScanEnhancedRequest;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.BucketLocationConstraint;
+import software.amazon.awssdk.services.s3.model.CreateBucketConfiguration;
 import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
 
 import java.time.Instant;
@@ -71,11 +73,19 @@ public class SpaceService {
         }
 
         String spaceId = UUID.randomUUID().toString();
-        String bucketName = String.format("report-portal-%s-%s-%s", spaceId, awsAccountId, awsRegion);
+        // S3 bucket names max 63 chars: "rp-" (3) + spaceName truncated (max 20) + "-" + short UUID (8) + "-" + accountId (12) + "-" + region (max 16) = ~60
+        String shortId = spaceId.substring(0, 8);
+        String truncatedName = request.spaceName().length() > 20
+                ? request.spaceName().substring(0, 20)
+                : request.spaceName();
+        String bucketName = String.format("rp-%s-%s-%s-%s", truncatedName, shortId, awsAccountId, awsRegion);
 
         try {
             s3Client.createBucket(CreateBucketRequest.builder()
                     .bucket(bucketName)
+                    .createBucketConfiguration(CreateBucketConfiguration.builder()
+                            .locationConstraint(BucketLocationConstraint.fromValue(awsRegion))
+                            .build())
                     .build());
             log.info("S3 bucket created: {}", bucketName);
         } catch (Exception e) {
@@ -146,6 +156,10 @@ public class SpaceService {
 
         auditService.logEvent(currentUser.userId(), currentUser.email(),
                 "SPACE_DELETED", spaceId, "SUCCESS");
+    }
+
+    public SpaceResponse getSpace(String spaceId) {
+        return toResponse(getSpaceEntity(spaceId));
     }
 
     public SpaceEntity getSpaceEntity(String spaceId) {

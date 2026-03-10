@@ -540,6 +540,7 @@ export class ApiStack extends cdk.Stack {
     adminSpaces.addMethod('POST', adminIntegration, authMethodOptions);
 
     const adminSpaceById = adminSpaces.addResource('{spaceId}');
+    adminSpaceById.addMethod('GET', adminIntegration, authMethodOptions);
     adminSpaceById.addMethod('DELETE', adminIntegration, authMethodOptions);
 
     // Reports within spaces
